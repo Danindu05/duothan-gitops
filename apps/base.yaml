@@ -15,9 +15,11 @@ spec:
   source:
     repoURL: https://github.com/Danindu05/duothan-gitops.git
     targetRevision: main
+    # Only the files directly in manifests/ — the subdirectories are owned by
+    # the per-component Applications. Argo CD does not recurse by default, and
+    # it drops an explicit `recurse: false` when it stores the Application, so
+    # stating it here would leave this app permanently OutOfSync.
     path: manifests
-    directory:
-      recurse: false
   destination:
     server: https://kubernetes.default.svc
     namespace: aegis
