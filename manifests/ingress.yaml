@@ -15,6 +15,7 @@ metadata:
   namespace: aegis
   annotations:
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.middlewares: aegis-hsts@kubernetescrd
     cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
   tls:
@@ -31,8 +32,8 @@ spec:
                 name: frontend
                 port: { number: 80 }
 ---
-# Plain HTTP stays served rather than redirected. Let's Encrypt fetches its challenge
-# token over it, and until the certificate exists there is nothing to redirect to.
+# Plain HTTP is answered only to redirect it. The certificate now exists, so anyone
+# arriving at the bare address is sent to the hostname it covers.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -40,6 +41,7 @@ metadata:
   namespace: aegis
   annotations:
     traefik.ingress.kubernetes.io/router.entrypoints: web
+    traefik.ingress.kubernetes.io/router.middlewares: aegis-https-redirect@kubernetescrd
 spec:
   rules:
     - http:

@@ -1,0 +1,35 @@
+# Sends plain HTTP arrivals to the certified hostname.
+#
+# A plain scheme redirect would not do: it would send someone who typed the bare
+# address to https://<ip>, which no certificate covers, turning a working page into
+# a security warning. This rewrites the host as well as the scheme, so every route
+# in lands on the name the certificate is actually issued for.
+#
+# Renewal is unaffected. Let's Encrypt fetches its token from a path far longer than
+# the "/" this is attached to, and Traefik gives the more specific route precedence,
+# so the challenge is answered rather than redirected away.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: https-redirect
+  namespace: aegis
+spec:
+  redirectRegex:
+    regex: ^http://[^/]+/(.*)
+    replacement: https://aegis.20.219.189.234.nip.io/${1}
+    permanent: true
+---
+# Tells a browser that has once arrived safely never to come back over plain HTTP,
+# which closes the window in which a redirect can be tampered with. Six months, and
+# scoped to this host alone — neither preloaded nor extended to subdomains, so it
+# stays reversible if this address is ever served differently.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: hsts
+  namespace: aegis
+spec:
+  headers:
+    stsSeconds: 15768000
+    stsIncludeSubdomains: false
+    stsPreload: false
