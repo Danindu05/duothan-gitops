@@ -47,8 +47,11 @@ spec:
           image: hashicorp/vault:1.17
           args: ["server", "-config=/vault/config/vault.hcl"]
           ports: [{ name: http, containerPort: 8200 }]
+          # No IPC_LOCK: the config sets disable_mlock, so the capability buys
+          # nothing and would breach the namespace's baseline security standard.
           securityContext:
-            capabilities: { add: [IPC_LOCK] }
+            allowPrivilegeEscalation: false
+            capabilities: { drop: [ALL] }
           volumeMounts:
             - { name: config, mountPath: /vault/config }
             - { name: data, mountPath: /vault/data }
