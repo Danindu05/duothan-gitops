@@ -42,13 +42,23 @@ spec:
     metadata:
       labels: { app: vault, tier: infrastructure }
     spec:
+      # The image ships as uid 100 / gid 1000; fsGroup makes the data volume
+      # writable by that group so Vault can persist its storage.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 1000
+        fsGroup: 1000
       containers:
         - name: vault
           image: hashicorp/vault:1.17
+          # Call the binary directly. The image's entrypoint tries to chown its
+          # config and set file capabilities, neither of which an unprivileged
+          # container may do — and neither of which Vault needs here, since the
+          # config sets disable_mlock.
+          command: ["vault"]
           args: ["server", "-config=/vault/config/vault.hcl"]
           ports: [{ name: http, containerPort: 8200 }]
-          # No IPC_LOCK: the config sets disable_mlock, so the capability buys
-          # nothing and would breach the namespace's baseline security standard.
           securityContext:
             allowPrivilegeEscalation: false
             capabilities: { drop: [ALL] }
