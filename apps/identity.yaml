@@ -1,0 +1,31 @@
+# Identity and access
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: aegis-identity
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    # Lower waves run first: namespace and secrets, then infrastructure, then
+    # the services that depend on them.
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Danindu05/duothan-gitops.git
+    targetRevision: main
+    path: manifests/services/identity
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: aegis
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff: { duration: 10s, factor: 2, maxDuration: 3m }

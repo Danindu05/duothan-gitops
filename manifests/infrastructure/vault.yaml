@@ -1,0 +1,71 @@
+# HashiCorp Vault — custodian of the platform's key material. Runs in dev-less
+# server mode with file storage on a persistent volume, initialised and unsealed
+# by the bootstrap job below (Shamir 3-of-5, mirroring the Master Key model).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-config
+  namespace: aegis
+data:
+  vault.hcl: |
+    ui = true
+    disable_mlock = true
+    storage "file" { path = "/vault/data" }
+    listener "tcp" {
+      address     = "0.0.0.0:8200"
+      tls_disable = 1
+    }
+    api_addr = "http://vault:8200"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vault-data
+  namespace: aegis
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests: { storage: 1Gi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vault
+  namespace: aegis
+  labels: { app: vault, tier: infrastructure }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: vault }
+  template:
+    metadata:
+      labels: { app: vault, tier: infrastructure }
+    spec:
+      containers:
+        - name: vault
+          image: hashicorp/vault:1.17
+          args: ["server", "-config=/vault/config/vault.hcl"]
+          ports: [{ name: http, containerPort: 8200 }]
+          securityContext:
+            capabilities: { add: [IPC_LOCK] }
+          volumeMounts:
+            - { name: config, mountPath: /vault/config }
+            - { name: data, mountPath: /vault/data }
+          resources:
+            requests: { cpu: 25m, memory: 64Mi }
+            limits: { memory: 256Mi }
+      volumes:
+        - name: config
+          configMap: { name: vault-config }
+        - name: data
+          persistentVolumeClaim: { claimName: vault-data }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vault
+  namespace: aegis
+spec:
+  selector: { app: vault }
+  ports: [{ name: http, port: 8200, targetPort: http }]

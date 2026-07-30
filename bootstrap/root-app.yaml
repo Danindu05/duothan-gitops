@@ -1,0 +1,26 @@
+# App-of-apps: the single Application an operator applies by hand. Everything
+# else — infrastructure and all nine services — is discovered from Git by Argo CD
+# and reconciled continuously, so the cluster can never quietly drift from the
+# repository (blueprint §7.4.1: "Git remains the single source of truth").
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: aegis-root
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Danindu05/duothan-gitops.git
+    targetRevision: main
+    path: apps
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

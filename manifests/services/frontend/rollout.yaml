@@ -1,0 +1,88 @@
+# Angular application served by nginx, which also proxies /api to the gateway.
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: frontend
+  namespace: aegis
+  labels: { app: frontend, tier: edge }
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels: { app: frontend }
+  strategy:
+    blueGreen:
+      activeService: frontend
+      previewService: frontend-preview
+      autoPromotionEnabled: false
+      scaleDownDelaySeconds: 60
+  template:
+    metadata:
+      labels: { app: frontend, tier: edge }
+    spec:
+      containers:
+        - name: frontend
+          image: danindu05/aegis-frontend:latest
+          imagePullPolicy: Always
+          ports: [{ name: http, containerPort: 80 }]
+          volumeMounts:
+            - { name: nginx-config, mountPath: /etc/nginx/conf.d }
+          resources:
+            requests: { cpu: 10m, memory: 24Mi }
+            limits: { memory: 96Mi }
+          readinessProbe:
+            httpGet: { path: /, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: nginx-config
+          configMap: { name: frontend-nginx }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: frontend-nginx
+  namespace: aegis
+data:
+  default.conf: |
+    server {
+        listen 80;
+        root /usr/share/nginx/html;
+        index index.html;
+
+        gzip on;
+        gzip_types text/css application/javascript application/json image/svg+xml;
+
+        # In-cluster the API lives behind the gateway service.
+        location /api/ {
+            proxy_pass http://gateway:8080/api/;
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+            proxy_set_header Host $host;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_read_timeout 60s;
+        }
+        location /health { proxy_pass http://gateway:8080/health; }
+
+        location / { try_files $uri $uri/ /index.html; }
+    }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: aegis
+  labels: { app: frontend, role: active }
+spec:
+  selector: { app: frontend }
+  ports: [{ name: http, port: 80, targetPort: http }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-preview
+  namespace: aegis
+  labels: { app: frontend, role: preview }
+spec:
+  selector: { app: frontend }
+  ports: [{ name: http, port: 80, targetPort: http }]

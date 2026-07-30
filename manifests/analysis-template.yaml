@@ -1,0 +1,37 @@
+# Gate between blue and green. The new colour must answer its health endpoint
+# consistently before a promotion is even offered; a release that cannot prove
+# itself never receives live traffic.
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: service-health
+  namespace: aegis
+spec:
+  args:
+    - name: service
+  metrics:
+    - name: health-check
+      # Five consecutive successes, five seconds apart — enough to catch a
+      # service that starts and then falls over.
+      count: 5
+      interval: 5s
+      successCondition: "result == true"
+      failureLimit: 0
+      provider:
+        job:
+          spec:
+            backoffLimit: 0
+            template:
+              spec:
+                restartPolicy: Never
+                containers:
+                  - name: probe
+                    image: curlimages/curl:8.11.0
+                    command: [sh, -c]
+                    args:
+                      - |
+                        set -e
+                        url="http://{{args.service}}:8080/health"
+                        code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$url" || echo 000)
+                        echo "health check $url -> $code"
+                        test "$code" = "200"

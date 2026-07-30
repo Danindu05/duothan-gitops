@@ -1,0 +1,57 @@
+# Python fraud scoring. Deliberately a separate runtime; if it is unavailable the
+# .NET services fall back to reduced rule-based limits rather than refusing to bank.
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: fraud
+  namespace: aegis
+  labels: { app: fraud, tier: banking }
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels: { app: fraud }
+  strategy:
+    blueGreen:
+      activeService: fraud
+      previewService: fraud-preview
+      autoPromotionEnabled: false
+      scaleDownDelaySeconds: 30
+  template:
+    metadata:
+      labels: { app: fraud, tier: banking }
+    spec:
+      containers:
+        - name: fraud
+          image: danindu05/aegis-fraud:latest
+          imagePullPolicy: Always
+          ports: [{ name: http, containerPort: 8000 }]
+          resources:
+            # scikit-learn and numpy make this the heaviest single container.
+            requests: { cpu: 100m, memory: 300Mi }
+            limits: { memory: 600Mi }
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 6
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fraud
+  namespace: aegis
+  labels: { app: fraud, role: active }
+spec:
+  selector: { app: fraud }
+  ports: [{ name: http, port: 8000, targetPort: http }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fraud-preview
+  namespace: aegis
+  labels: { app: fraud, role: preview }
+spec:
+  selector: { app: fraud }
+  ports: [{ name: http, port: 8000, targetPort: http }]

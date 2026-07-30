@@ -1,0 +1,95 @@
+# Double-entry ledger, transfer saga, reconciliation
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: transaction
+  namespace: aegis
+  labels: { app: transaction, tier: banking }
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels: { app: transaction }
+  strategy:
+    blueGreen:
+      # The new colour runs alongside the old and is reachable on the preview
+      # service; live traffic only moves when someone promotes it.
+      activeService: transaction
+      previewService: transaction-preview
+      autoPromotionEnabled: false
+      scaleDownDelaySeconds: 60
+      prePromotionAnalysis:
+        templates: [{ templateName: service-health }]
+        args: [{ name: service, value: transaction-preview }]
+  template:
+    metadata:
+      labels: { app: transaction, tier: banking }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: transaction
+          image: danindu05/aegis-transaction:latest
+          imagePullPolicy: Always
+          ports: [{ name: http, containerPort: 8080 }]
+          env:
+            - { name: ASPNETCORE_ENVIRONMENT, value: Production }
+            - { name: ASPNETCORE_URLS, value: "http://+:8080" }
+            - { name: DOTNET_SYSTEM_NET_DISABLEIPV6, value: "1" }
+            # Workstation GC keeps each service near 70 MB instead of ~120 MB,
+            # which matters when nine of them share one node.
+            - { name: DOTNET_gcServer, value: "0" }
+            - { name: Vault__Address, value: "http://vault:8200" }
+            - { name: Services__Identity, value: "http://identity:8080" }
+            - { name: Services__Account, value: "http://account:8080" }
+            - { name: Services__Transaction, value: "http://transaction:8080" }
+            - { name: Services__Payment, value: "http://payment:8080" }
+            - { name: Services__Lending, value: "http://lending:8080" }
+            - { name: Services__Platform, value: "http://platform:8080" }
+            - { name: Services__Fraud, value: "http://fraud:8000" }
+            - name: ConnectionStrings__RabbitMq
+              value: "rabbitmq://guest:guest@rabbitmq:5672/"
+            - name: ConnectionStrings__TransactionDb
+              valueFrom:
+                secretKeyRef: { name: aegis-databases, key: transaction }
+            - name: VAULT_ROLE_ID
+              valueFrom:
+                secretKeyRef: { name: aegis-vault-approle, key: role_id }
+            - name: VAULT_SECRET_ID
+              valueFrom:
+                secretKeyRef: { name: aegis-vault-approle, key: secret_id }
+          resources:
+            requests: { cpu: 50m, memory: 160Mi }
+            limits: { memory: 400Mi }
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 25
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 60
+            periodSeconds: 20
+            failureThreshold: 4
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: transaction
+  namespace: aegis
+  labels: { app: transaction, role: active }
+spec:
+  selector: { app: transaction }
+  ports: [{ name: http, port: 8080, targetPort: http }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: transaction-preview
+  namespace: aegis
+  labels: { app: transaction, role: preview }
+spec:
+  selector: { app: transaction }
+  ports: [{ name: http, port: 8080, targetPort: http }]

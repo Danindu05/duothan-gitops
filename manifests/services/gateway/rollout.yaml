@@ -1,0 +1,77 @@
+# API gateway — the single entry point for every client (blueprint §7.4.1 names
+# the gateway and frontend as blue-green candidates because a bad release here
+# affects everything behind it).
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: gateway
+  namespace: aegis
+  labels: { app: gateway, tier: edge }
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels: { app: gateway }
+  strategy:
+    blueGreen:
+      activeService: gateway
+      previewService: gateway-preview
+      autoPromotionEnabled: false
+      scaleDownDelaySeconds: 60
+      prePromotionAnalysis:
+        templates: [{ templateName: service-health }]
+        args: [{ name: service, value: gateway-preview }]
+  template:
+    metadata:
+      labels: { app: gateway, tier: edge }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: gateway
+          image: danindu05/aegis-gateway:latest
+          imagePullPolicy: Always
+          ports: [{ name: http, containerPort: 8080 }]
+          env:
+            - { name: ASPNETCORE_ENVIRONMENT, value: Production }
+            - { name: ASPNETCORE_URLS, value: "http://+:8080" }
+            - { name: DOTNET_SYSTEM_NET_DISABLEIPV6, value: "1" }
+            - { name: DOTNET_gcServer, value: "0" }
+            - { name: Vault__Address, value: "http://vault:8200" }
+            - { name: Cors__Origins__0, value: "http://aegis.local" }
+            - name: VAULT_ROLE_ID
+              valueFrom:
+                secretKeyRef: { name: aegis-vault-approle, key: role_id }
+            - name: VAULT_SECRET_ID
+              valueFrom:
+                secretKeyRef: { name: aegis-vault-approle, key: secret_id }
+          resources:
+            requests: { cpu: 50m, memory: 140Mi }
+            limits: { memory: 320Mi }
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 25
+            periodSeconds: 10
+            failureThreshold: 6
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  namespace: aegis
+  labels: { app: gateway, role: active }
+spec:
+  selector: { app: gateway }
+  ports: [{ name: http, port: 8080, targetPort: http }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway-preview
+  namespace: aegis
+  labels: { app: gateway, role: preview }
+spec:
+  selector: { app: gateway }
+  ports: [{ name: http, port: 8080, targetPort: http }]
