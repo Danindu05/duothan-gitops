@@ -1,0 +1,38 @@
+# Who signs the platform's certificate.
+#
+# Let's Encrypt proves control of the hostname by fetching a token over plain HTTP
+# on port 80, so that port stays open and unredirected for the challenge path even
+# once the rest of the site is HTTPS-only.
+#
+# The staging issuer is here because Let's Encrypt rate-limits failures against the
+# production endpoint. Anything uncertain should be tried against staging first; its
+# certificates are untrusted by browsers but prove the plumbing works.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+spec:
+  acme:
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    email: wealthwaylk@gmail.com
+    privateKeySecretRef:
+      name: letsencrypt-staging-account
+    solvers:
+      - http01:
+          ingress:
+            class: traefik
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: wealthwaylk@gmail.com
+    privateKeySecretRef:
+      name: letsencrypt-prod-account
+    solvers:
+      - http01:
+          ingress:
+            class: traefik

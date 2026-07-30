@@ -40,7 +40,7 @@ spec:
             - { name: DOTNET_SYSTEM_NET_DISABLEIPV6, value: "1" }
             - { name: DOTNET_gcServer, value: "0" }
             - { name: Vault__Address, value: "http://vault:8200" }
-            - { name: Cors__Origins__0, value: "http://aegis.local" }
+            - { name: Cors__Origins__0, value: "https://aegis.20.219.189.234.nip.io" }
             - name: VAULT_ROLE_ID
               valueFrom:
                 secretKeyRef: { name: aegis-vault-approle, key: role_id }

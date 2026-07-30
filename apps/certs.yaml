@@ -1,0 +1,36 @@
+# The certificate authorities the platform trusts to sign for it.
+#
+# Separate from the base application because these are cert-manager custom resources:
+# they cannot be applied until its CRDs are established, so they follow it rather
+# than travelling with the namespace and ingress.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: aegis-certs
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Danindu05/duothan-gitops.git
+    targetRevision: main
+    path: manifests/certs
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: aegis
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      # The ClusterIssuer kind does not exist until cert-manager has installed its
+      # CRDs, and a dry run against a kind the API server has never heard of fails.
+      - SkipDryRunOnMissingResource=true
+    retry:
+      limit: 10
+      backoff: { duration: 15s, factor: 2, maxDuration: 5m }

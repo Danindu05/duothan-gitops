@@ -1,10 +1,42 @@
 # Traefik routes the public hostname to the frontend, which proxies /api onward
 # to the gateway. The preview colour is published on a separate host so a release
 # can be exercised end to end before anyone promotes it.
+#
+# The site is served over TLS on a hostname rather than a bare address because a
+# browser withholds the camera, and everything else it treats as privileged, from an
+# origin it does not consider secure — and a bare IP address is never considered
+# secure, whatever certificate it presents. nip.io resolves the address embedded in
+# the name straight back to this machine, which makes the hostname real enough for
+# Let's Encrypt to certify without anyone having to own a domain.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: aegis
+  namespace: aegis
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  tls:
+    - hosts: [aegis.20.219.189.234.nip.io]
+      secretName: aegis-tls
+  rules:
+    - host: aegis.20.219.189.234.nip.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port: { number: 80 }
+---
+# Plain HTTP stays served rather than redirected. Let's Encrypt fetches its challenge
+# token over it, and until the certificate exists there is nothing to redirect to.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: aegis-http
   namespace: aegis
   annotations:
     traefik.ingress.kubernetes.io/router.entrypoints: web
