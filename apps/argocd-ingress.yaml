@@ -1,0 +1,32 @@
+# How Argo CD is reached from outside the cluster.
+#
+# Argo CD itself is installed by hand rather than managed from here — it cannot
+# bootstrap itself — but the route into it is ordinary configuration and belongs in
+# git like everything else, so it survives a rebuild of the machine.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argocd-ingress
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Danindu05/duothan-gitops.git
+    targetRevision: main
+    path: manifests/argocd
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff: { duration: 15s, factor: 2, maxDuration: 3m }
