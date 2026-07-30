@@ -25,7 +25,7 @@ spec:
         - name: fraud
           image: danindu05/aegis-fraud:latest
           imagePullPolicy: Always
-          ports: [{ name: http, containerPort: 8000 }]
+          ports: [{ name: http, containerPort: 8000, protocol: TCP }]
           resources:
             # scikit-learn and numpy make this the heaviest single container.
             requests: { cpu: 100m, memory: 300Mi }
