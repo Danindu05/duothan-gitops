@@ -24,3 +24,6 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
+      # Without server-side apply Argo CD writes a last-applied-configuration
+      # annotation onto each child Application, which then reads as permanent drift.
+      - ServerSideApply=true
