@@ -24,29 +24,59 @@ manifests/
 scripts/                    secret creation and Vault bootstrap (never committed)
 ```
 
-## Blue-green deployment
+## Progressive delivery
 
-Every service is an Argo Rollouts `Rollout`, not a plain `Deployment`. A release
-brings up the new colour beside the running one:
+Nothing is released by replacing what is running. Two strategies are used, split the
+way blueprint 7.5 asks for.
+
+**Canary — the seven backend services.** A new version takes half the traffic while
+the stable one keeps serving the rest, and only continues if it proves healthy under
+that load. A release that misbehaves is seen by a fraction of customers for one
+analysis window instead of by everyone at once. Weight is approximated by pod count
+because there is no service mesh here, so with two replicas the real steps are half
+and all; the pauses are what make it a canary rather than a rolling update, since each
+one is a point where analysis can stop the release.
+
+**Blue-green — the gateway and the frontend.** The two entry points come up complete
+beside the running version and are exercised on their preview host before any traffic
+moves. These are the components where a half-migrated state is most visible to a
+customer, so they change over all at once or not at all.
 
 | | |
 |---|---|
-| **active service** | `identity` — carries live customer traffic |
-| **preview service** | `identity-preview` — the new colour, reachable but not live |
-| **promotion** | manual (`autoPromotionEnabled: false`) |
-| **gate** | five consecutive health checks against the preview colour |
-| **rollback** | instant — the old colour is still running for 60 seconds |
-
-Nothing reaches customers until a human promotes it:
+| **gate** | five health checks, ten seconds apart, against the new revision |
+| **on failure** | the rollout aborts and traffic stays on the stable version |
+| **rollback** | instant — the previous revision is still running |
 
 ```bash
-kubectl argo rollouts get rollout identity -n aegis --watch   # watch both colours
-kubectl argo rollouts promote identity -n aegis               # send traffic to green
-kubectl argo rollouts undo identity -n aegis                  # fall back to blue
+kubectl argo rollouts get rollout identity -n aegis --watch   # follow a release
+kubectl argo rollouts promote identity -n aegis               # skip a pause
+kubectl argo rollouts abort identity -n aegis                 # stop and hold on stable
+kubectl argo rollouts undo identity -n aegis                  # go back a revision
 ```
 
-This is what makes a bad release survivable: the previous version never stopped
-running, so recovery is a traffic switch rather than a redeploy.
+## How a change reaches the cluster
+
+Nobody applies anything by hand, and no image tag moves.
+
+```
+push to duothan-6.0
+      ↓  Build and publish images
+image pushed as aegis-<service>:sha-<commit>
+      ↓  Promote to GitOps
+this repository's manifests updated to that tag
+      ↓  Argo CD notices the diff
+canary or blue-green rollout, gated on analysis
+```
+
+The tag names a commit, which is what makes the running system answerable to a line
+of history. `latest` cannot be deployed by Argo CD, because it cannot tell one
+`latest` from another, and cannot be rolled back to, because yesterday's no longer
+exists anywhere.
+
+Promotion needs a `GITOPS_TOKEN` secret on the application repository — a
+fine-grained token with Contents: read/write here. The built-in `GITHUB_TOKEN` cannot
+reach across repositories.
 
 ## Sync waves
 

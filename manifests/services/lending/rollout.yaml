@@ -11,16 +11,29 @@ spec:
   selector:
     matchLabels: { app: lending }
   strategy:
-    blueGreen:
-      # The new colour runs alongside the old and is reachable on the preview
-      # service; live traffic only moves when someone promotes it.
-      activeService: lending
-      previewService: lending-preview
-      autoPromotionEnabled: false
-      scaleDownDelaySeconds: 60
-      prePromotionAnalysis:
+    # Canary, per blueprint 7.5: money-moving services take a small share of live
+    # traffic first, and every step is gated on the new version actually being
+    # healthy under that traffic. A release that misbehaves is seen by a fraction
+    # of customers for one analysis window rather than by all of them at once.
+    #
+    # Weight here is approximated by pod count — there is no service mesh on this
+    # cluster — so with two replicas the meaningful steps are half and all. The
+    # pauses are what make it a canary rather than a rolling update: each one is a
+    # decision point where the analysis can stop the release.
+    canary:
+      maxSurge: 1
+      maxUnavailable: 0
+      analysis:
         templates: [{ templateName: service-health }]
-        args: [{ name: service, value: lending-preview }]
+        args: [{ name: service, value: lending-canary }]
+        startingStep: 1
+      canaryService: lending-canary
+      stableService: lending
+      steps:
+        - setWeight: 50
+        - pause: { duration: 60s }
+        - setWeight: 100
+        - pause: { duration: 30s }
   template:
     metadata:
       labels: { app: lending, tier: banking }
@@ -31,8 +44,8 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: lending
-          image: danindu05/aegis-lending:latest
-          imagePullPolicy: Always
+          image: danindu05/aegis-lending:sha-5e7b528
+          imagePullPolicy: IfNotPresent
           ports: [{ name: http, containerPort: 8080, protocol: TCP }]
           env:
             - { name: ASPNETCORE_ENVIRONMENT, value: Production }
@@ -87,9 +100,9 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: lending-preview
+  name: lending-canary
   namespace: aegis
-  labels: { app: lending, role: preview }
+  labels: { app: lending, role: canary }
 spec:
   selector: { app: lending }
   ports: [{ name: http, port: 8080, targetPort: http }]

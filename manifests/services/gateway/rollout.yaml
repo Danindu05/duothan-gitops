@@ -31,8 +31,8 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: gateway
-          image: danindu05/aegis-gateway:latest
-          imagePullPolicy: Always
+          image: danindu05/aegis-gateway:sha-5e7b528
+          imagePullPolicy: IfNotPresent
           ports: [{ name: http, containerPort: 8080, protocol: TCP }]
           env:
             - { name: ASPNETCORE_ENVIRONMENT, value: Production }

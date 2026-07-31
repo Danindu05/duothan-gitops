@@ -1,6 +1,13 @@
-# Gate between blue and green. The new colour must answer its health endpoint
-# consistently before a promotion is even offered; a release that cannot prove
-# itself never receives live traffic.
+# The gate a new version has to pass before it is allowed to keep serving.
+#
+# The check is deliberately dull: ask the new revision's own health endpoint,
+# several times, a few seconds apart. Once is not evidence — a version that starts,
+# answers, and then falls over on its first real request would sail through a single
+# probe. Repeating it catches exactly that, which is the failure this exists to stop.
+#
+# A failure aborts the rollout, so Argo Rollouts holds traffic on the stable
+# revision. A bad release becomes a release that never finished, rather than an
+# incident somebody has to notice and undo.
 apiVersion: argoproj.io/v1alpha1
 kind: AnalysisTemplate
 metadata:
@@ -9,29 +16,45 @@ metadata:
 spec:
   args:
     - name: service
+    # Ports differ across the platform — the .NET services listen on 8080, the
+    # Python fraud service on 8000. Assuming one of them meant the gate on the
+    # other was checking a port nothing answered on.
+    - name: port
+      value: "8080"
   metrics:
     - name: health-check
-      # Five consecutive successes, five seconds apart — enough to catch a
-      # service that starts and then falls over.
       count: 5
-      interval: 5s
-      successCondition: "result == true"
+      interval: 10s
+      # No allowance: this already runs five times, and a gate that may fail is
+      # not a gate.
       failureLimit: 0
       provider:
         job:
           spec:
             backoffLimit: 0
+            ttlSecondsAfterFinished: 120
             template:
               spec:
                 restartPolicy: Never
+                securityContext:
+                  runAsNonRoot: true
+                  runAsUser: 65534
+                  seccompProfile: { type: RuntimeDefault }
                 containers:
                   - name: probe
                     image: curlimages/curl:8.11.0
+                    securityContext:
+                      allowPrivilegeEscalation: false
+                      capabilities: { drop: [ALL] }
                     command: [sh, -c]
                     args:
                       - |
-                        set -e
-                        url="http://{{args.service}}:8080/health"
+                        url="http://{{args.service}}:{{args.port}}/health"
                         code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$url" || echo 000)
                         echo "health check $url -> $code"
+                        # The job's exit status is the measurement: anything other
+                        # than 200 fails the analysis and stops the rollout.
                         test "$code" = "200"
+                    resources:
+                      requests: { cpu: 10m, memory: 16Mi }
+                      limits: { memory: 64Mi }
