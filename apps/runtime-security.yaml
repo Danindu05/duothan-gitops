@@ -81,11 +81,10 @@ spec:
           resources:
             requests: { cpu: 25m, memory: 64Mi }
             limits: { memory: 160Mi }
-          config:
-            # Alerts land beside every other metric, so a runtime event and a spike
-            # in failed transfers can be looked at on one screen.
-            prometheus:
-              extralabels: "platform:aegis"
+          # No extra Prometheus labels configured. The label syntax this expects
+          # is not the one it documents, and getting it wrong panics the process at
+          # start-up rather than being ignored — the events reaching the UI matter
+          # more than tagging the metrics about them.
           webui:
             enabled: true
             replicaCount: 1
