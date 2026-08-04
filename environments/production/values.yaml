@@ -9,8 +9,15 @@
 # and it reintroduces the duplication the chart removed.
 
 image:
-  registry: ghcr.io/danindu05
+  # Docker Hub is what this cluster pulls. The images are signed there — keyless
+  # signing does not depend on the registry, only on the certificate authority and
+  # the transparency log.
+  registry: danindu05
   pullPolicy: IfNotPresent
+  # Rewritten by the promotion workflow after a successful build. Kept here rather
+  # than in each Application so there is one line to change and one line to read
+  # when asking what is deployed.
+  tag: sha-b9a03b7
 
 # Two replicas: enough for a canary to mean something (one carries the new
 # revision while one carries the stable), and as many as one node should hold

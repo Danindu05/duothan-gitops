@@ -23,11 +23,6 @@ spec:
       valueFiles:
         - ../../environments/base/lending.yaml
         - ../../environments/production/values.yaml
-      parameters:
-        - name: image.registry
-          value: danindu05
-        - name: image.tag
-          value: sha-e21d882
   destination:
     server: https://kubernetes.default.svc
     namespace: aegis
