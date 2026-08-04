@@ -25,8 +25,10 @@ spec:
     targetRevision: 3.3.4
     helm:
       values: |
-        # One replica of each: this is a single node, and three would simply be
-        # three copies waiting on the same machine.
+        # Kept to what the chart definitely accepts. The previous attempt set a
+        # failure policy through a key the chart merges differently, and the whole
+        # render failed — so nothing installed at all, and the policies had nothing
+        # to attach to. Less configuration that works beats more that does not.
         admissionController:
           replicas: 1
           resources:
@@ -44,12 +46,6 @@ spec:
           resources:
             requests: { cpu: 25m, memory: 96Mi }
             limits: { memory: 256Mi }
-        # Admission failure policy is set per-policy rather than here — the chart
-        # expects a different shape for this key and rejects the override, which
-        # takes the whole install with it. The policies themselves carry it.
-        features:
-          policyExceptions:
-            enabled: false
   destination:
     server: https://kubernetes.default.svc
     namespace: kyverno

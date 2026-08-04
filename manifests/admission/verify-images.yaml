@@ -6,6 +6,10 @@
 # transparency log. So the question asked here is not "was this signed" — anyone
 # can sign anything — but "was this signed by that workflow, in that repository".
 #
+# Both registries are listed, because the platform publishes to both and the
+# cluster pulls from Docker Hub. Verifying only the copy nobody deploys would
+# prove nothing about the one that runs.
+#
 # What it stops: a tag repointed at something else, a compromised registry account
 # serving a different image under a familiar name, or a manifest edited to name an
 # image nobody here built. In each case Argo CD would report the cluster perfectly
@@ -34,6 +38,8 @@ spec:
               namespaces: [aegis]
       verifyImages:
         - imageReferences:
+            - "danindu05/aegis-*"
+            - "index.docker.io/danindu05/aegis-*"
             - "ghcr.io/danindu05/aegis-*"
           mutateDigest: true
           # Rewrites the tag to the digest that was verified. Without this, a tag

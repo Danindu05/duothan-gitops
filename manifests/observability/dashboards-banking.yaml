@@ -1,0 +1,200 @@
+# What the bank is doing, rather than what the cluster is doing.
+#
+# The blueprint asks for transaction failure rate and fraud scoring latency by
+# name, and they belong together: the fraud engine sits directly in the path of
+# every transfer, so when it slows down, payments slow down, and when it is
+# unreachable, screening quietly falls back to reduced rules. Reading those two
+# on separate screens is how that connection gets missed.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aegis-dashboard-banking
+  namespace: observability
+  labels:
+    grafana_dashboard: "1"
+data:
+  aegis-banking.json: |
+    {
+      "title": "AEGIS · Banking operations",
+      "uid": "aegis-banking",
+      "tags": ["aegis"],
+      "timezone": "Asia/Colombo",
+      "refresh": "30s",
+      "time": { "from": "now-6h", "to": "now" },
+      "panels": [
+        {
+          "type": "row",
+          "title": "Money movement",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+        },
+        {
+          "type": "stat",
+          "title": "Transfers / sec",
+          "description": "Requests reaching the Transaction service, which owns the ledger and the saga.",
+          "gridPos": { "h": 4, "w": 5, "x": 0, "y": 1 },
+          "targets": [{
+            "expr": "sum(rate(http_requests_received_total{namespace=\"aegis\", service=~\"transaction.*\"}[5m]))",
+            "refId": "A"
+          }],
+          "fieldConfig": { "defaults": { "unit": "reqps", "decimals": 2 } }
+        },
+        {
+          "type": "stat",
+          "title": "Transfers failing",
+          "description": "Share of requests to the ledger the platform could not complete. Distinct from a payment refused on purpose — a blocked transfer is the system working.",
+          "gridPos": { "h": 4, "w": 5, "x": 5, "y": 1 },
+          "targets": [{
+            "expr": "sum(rate(http_requests_received_total{namespace=\"aegis\", service=~\"transaction.*\", code=~\"5..\"}[5m])) / clamp_min(sum(rate(http_requests_received_total{namespace=\"aegis\", service=~\"transaction.*\"}[5m])), 0.001)",
+            "refId": "A"
+          }],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit", "decimals": 2,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "orange", "value": 0.01 },
+                  { "color": "red", "value": 0.05 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "type": "stat",
+          "title": "Ledger response, p95",
+          "description": "How long the slowest tenth of ledger calls take. A transfer crosses two services and a saga, so this is the closest measure of how long a customer waits to be told their money moved.",
+          "gridPos": { "h": 4, "w": 5, "x": 10, "y": 1 },
+          "targets": [{
+            "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{namespace=\"aegis\", service=~\"transaction.*\"}[5m])))",
+            "refId": "A"
+          }],
+          "fieldConfig": { "defaults": { "unit": "s", "decimals": 2 } }
+        },
+        {
+          "type": "stat",
+          "title": "Identity: sign-ins / sec",
+          "description": "Every sign-in needs an authenticator code, so this is people actually getting in rather than merely arriving.",
+          "gridPos": { "h": 4, "w": 4, "x": 15, "y": 1 },
+          "targets": [{
+            "expr": "sum(rate(http_requests_received_total{namespace=\"aegis\", service=~\"identity.*\"}[5m]))",
+            "refId": "A"
+          }],
+          "fieldConfig": { "defaults": { "unit": "reqps", "decimals": 2 } }
+        },
+        {
+          "type": "stat",
+          "title": "Balances served / sec",
+          "description": "The Account service owns every balance on the platform and is the only writer of them.",
+          "gridPos": { "h": 4, "w": 5, "x": 19, "y": 1 },
+          "targets": [{
+            "expr": "sum(rate(http_requests_received_total{namespace=\"aegis\", service=~\"account.*\"}[5m]))",
+            "refId": "A"
+          }],
+          "fieldConfig": { "defaults": { "unit": "reqps", "decimals": 2 } }
+        },
+        {
+          "type": "row",
+          "title": "Fraud screening",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 }
+        },
+        {
+          "type": "stat",
+          "title": "Fraud engine",
+          "description": "When this is unreachable, transfers are screened by reduced rule-based limits instead of the engine. Banking continues, which is the point — but a scoring outage that lasts is a window somebody could use.",
+          "gridPos": { "h": 4, "w": 6, "x": 0, "y": 6 },
+          "targets": [{ "expr": "max(up{namespace=\"aegis\", service=~\"fraud.*\"})", "refId": "A" }],
+          "fieldConfig": {
+            "defaults": {
+              "mappings": [{
+                "type": "value",
+                "options": {
+                  "0": { "text": "Degraded to rules", "color": "orange" },
+                  "1": { "text": "Scoring", "color": "green" }
+                }
+              }]
+            }
+          }
+        },
+        {
+          "type": "stat",
+          "title": "Scoring latency, p95",
+          "description": "Measured inside the fraud service, so it is the engine's own time rather than the caller's — which would include the network and blame this service for someone else's slowness. It sits in the path of every transfer, so this is added to every payment.",
+          "gridPos": { "h": 4, "w": 6, "x": 6, "y": 6 },
+          "targets": [{
+            "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{namespace=\"aegis\", job=~\"fraud.*\"}[5m])))",
+            "refId": "A"
+          }],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s", "decimals": 3,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "orange", "value": 0.2 },
+                  { "color": "red", "value": 0.5 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "type": "timeseries",
+          "title": "Scoring requests and latency",
+          "description": "The engine is asked once per transfer that is not between a customer's own accounts.",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+          "targets": [
+            {
+              "expr": "sum(rate(http_request_duration_seconds_count{namespace=\"aegis\", job=~\"fraud.*\"}[5m]))",
+              "legendFormat": "scored / sec", "refId": "A"
+            },
+            {
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{namespace=\"aegis\", job=~\"fraud.*\"}[5m])))",
+              "legendFormat": "p95 latency", "refId": "B"
+            }
+          ],
+          "fieldConfig": { "defaults": { "custom": { "fillOpacity": 8, "lineWidth": 2 } } }
+        },
+        {
+          "type": "timeseries",
+          "title": "Traffic by service",
+          "description": "Which parts of the bank customers are using. Tier 3 going quiet while Tier 1 continues is the platform shedding load as designed, not an outage.",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 10 },
+          "targets": [{
+            "expr": "sum by (service) (rate(http_requests_received_total{namespace=\"aegis\", service!~\".*-canary|.*-preview\"}[5m]))",
+            "legendFormat": "{{service}}", "refId": "A"
+          }],
+          "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "fillOpacity": 15, "lineWidth": 1, "stacking": { "mode": "normal" } } } }
+        },
+        {
+          "type": "row",
+          "title": "Where the errors are",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 18 }
+        },
+        {
+          "type": "timeseries",
+          "title": "Responses by status code",
+          "description": "4xx is a customer asking for something they cannot have — a wrong password, a blocked payment. 5xx is the bank failing them. Only the second is an incident.",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 19 },
+          "targets": [{
+            "expr": "sum by (code) (rate(http_requests_received_total{namespace=\"aegis\"}[5m]))",
+            "legendFormat": "{{code}}", "refId": "A"
+          }],
+          "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "fillOpacity": 20, "lineWidth": 1, "stacking": { "mode": "normal" } } } }
+        },
+        {
+          "type": "table",
+          "title": "Busiest endpoints",
+          "description": "What the platform actually spends its time answering.",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 19 },
+          "targets": [{
+            "expr": "topk(12, sum by (service, method, code) (rate(http_requests_received_total{namespace=\"aegis\"}[15m])))",
+            "format": "table", "instant": true, "refId": "A"
+          }],
+          "transformations": [{ "id": "organize", "options": { "excludeByName": { "Time": true, "job": true, "instance": true } } }],
+          "fieldConfig": { "defaults": { "unit": "reqps", "decimals": 3 } }
+        }
+      ]
+    }

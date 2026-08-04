@@ -1,0 +1,206 @@
+# Tells Prometheus to scrape Argo Rollouts, so a release in progress is visible
+# on a dashboard rather than only through kubectl.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: argo-rollouts
+  namespace: argo-rollouts
+  labels: { app.kubernetes.io/part-of: aegis }
+spec:
+  namespaceSelector:
+    matchNames: [argo-rollouts]
+  selector:
+    matchLabels: { app.kubernetes.io/name: argo-rollouts-metrics }
+  endpoints:
+    - port: metrics
+      interval: 30s
+---
+# The screen somebody opens first when they are asked whether the bank is well.
+#
+# Deliberately not a Kubernetes dashboard. Whether a pod restarted is a means;
+# whether customers can move money is the end, and the two are only loosely
+# related — a platform can have every pod running and be refusing every payment.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aegis-dashboard-platform
+  namespace: observability
+  labels:
+    grafana_dashboard: "1"
+data:
+  aegis-platform.json: |
+    {
+      "title": "AEGIS · Platform health",
+      "uid": "aegis-platform",
+      "tags": ["aegis"],
+      "timezone": "Asia/Colombo",
+      "refresh": "30s",
+      "time": { "from": "now-6h", "to": "now" },
+      "panels": [
+        {
+          "type": "stat",
+          "title": "Services answering",
+          "description": "Out of nine. Anything less than the full count means part of the platform is unreachable, whatever the pods say.",
+          "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+          "targets": [{ "expr": "count(up{namespace=\"aegis\"} == 1)", "refId": "A" }],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "red", "value": null },
+                  { "color": "orange", "value": 10 },
+                  { "color": "green", "value": 14 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "type": "stat",
+          "title": "Requests / sec",
+          "description": "Across every service. A sudden fall is as interesting as a spike.",
+          "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+          "targets": [{ "expr": "sum(rate(http_requests_received_total{namespace=\"aegis\"}[5m]))", "refId": "A" }],
+          "fieldConfig": { "defaults": { "unit": "reqps", "decimals": 1 } }
+        },
+        {
+          "type": "stat",
+          "title": "Failing requests",
+          "description": "Share of requests answered with a server error. Above 5% is where the rollout gate refuses to promote a release.",
+          "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+          "targets": [{
+            "expr": "sum(rate(http_requests_received_total{namespace=\"aegis\",code=~\"5..\"}[5m])) / clamp_min(sum(rate(http_requests_received_total{namespace=\"aegis\"}[5m])), 0.001)",
+            "refId": "A"
+          }],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit", "decimals": 2,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "orange", "value": 0.01 },
+                  { "color": "red", "value": 0.05 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "type": "stat",
+          "title": "Slowest tenth",
+          "description": "95th percentile response time. The experience of the unluckiest customers, which is the one worth measuring.",
+          "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+          "targets": [{
+            "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{namespace=\"aegis\"}[5m])))",
+            "refId": "A"
+          }],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s", "decimals": 2,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "orange", "value": 1 },
+                  { "color": "red", "value": 2 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "type": "stat",
+          "title": "Vault",
+          "description": "A sealed vault holds no key material, and every service that reads a secret at boot fails with it. This is the first thing to check when everything is broken at once.",
+          "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
+          "targets": [{ "expr": "up{namespace=\"aegis\", service=\"vault\"}", "refId": "A" }],
+          "fieldConfig": {
+            "defaults": {
+              "mappings": [{
+                "type": "value",
+                "options": { "0": { "text": "Unreachable", "color": "red" }, "1": { "text": "Open", "color": "green" } }
+              }]
+            }
+          }
+        },
+        {
+          "type": "stat",
+          "title": "Pod restarts / hour",
+          "description": "Sustained restarts across many services at once usually means Vault, not the services.",
+          "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
+          "targets": [{
+            "expr": "sum(rate(kube_pod_container_status_restarts_total{namespace=\"aegis\"}[1h])) * 3600",
+            "refId": "A"
+          }],
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 1,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "orange", "value": 1 },
+                  { "color": "red", "value": 3 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "type": "timeseries",
+          "title": "Requests per second, by service",
+          "description": "Which parts of the bank are being used, and which have gone quiet.",
+          "gridPos": { "h": 9, "w": 12, "x": 0, "y": 4 },
+          "targets": [{
+            "expr": "sum by (service) (rate(http_requests_received_total{namespace=\"aegis\"}[5m]))",
+            "legendFormat": "{{service}}", "refId": "A"
+          }],
+          "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "fillOpacity": 8, "lineWidth": 2 } } }
+        },
+        {
+          "type": "timeseries",
+          "title": "Response time, 95th percentile by service",
+          "description": "The two-second line is where the release gate stops promoting. Anything sustained above it is visible to customers as a platform that feels broken even while it answers.",
+          "gridPos": { "h": 9, "w": 12, "x": 12, "y": 4 },
+          "targets": [{
+            "expr": "histogram_quantile(0.95, sum by (service, le) (rate(http_request_duration_seconds_bucket{namespace=\"aegis\"}[5m])))",
+            "legendFormat": "{{service}}", "refId": "A"
+          }],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "custom": { "fillOpacity": 0, "lineWidth": 2 },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 2 }]
+              },
+              "custom.thresholdsStyle": { "mode": "dashed" }
+            }
+          }
+        },
+        {
+          "type": "timeseries",
+          "title": "Server errors by service",
+          "description": "Errors the platform returned, not errors customers caused. A 4xx is somebody asking for the wrong thing; a 5xx is the bank failing them.",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 13 },
+          "targets": [{
+            "expr": "sum by (service) (rate(http_requests_received_total{namespace=\"aegis\",code=~\"5..\"}[5m]))",
+            "legendFormat": "{{service}}", "refId": "A"
+          }],
+          "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "fillOpacity": 20, "lineWidth": 1 } } }
+        },
+        {
+          "type": "timeseries",
+          "title": "Memory held, by service",
+          "description": "Nine services share one node. A single service growing without bound is how the others get evicted.",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 13 },
+          "targets": [{
+            "expr": "sum by (pod) (container_memory_working_set_bytes{namespace=\"aegis\", container!=\"\", container!=\"POD\"})",
+            "legendFormat": "{{pod}}", "refId": "A"
+          }],
+          "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "fillOpacity": 8, "lineWidth": 1 } } }
+        }
+      ]
+    }

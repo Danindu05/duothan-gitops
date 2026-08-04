@@ -1,0 +1,61 @@
+# The Falcosidekick UI.
+#
+# Falco produces a stream of events; without somewhere to read them it is a log
+# nobody tails. The UI is what turns "a shell was opened inside a banking
+# container" from a line in a file into something a person notices.
+#
+# Published over TLS like everything else. It has its own sign-in, which matters
+# more here than for the metrics dashboards — this shows what happened inside the
+# containers, and that is a map of the platform's internals.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: falco-ui
+  namespace: falco
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  tls:
+    - hosts: [falco.20.219.189.234.nip.io]
+      secretName: falco-ui-tls
+  rules:
+    - host: falco.20.219.189.234.nip.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: runtime-security-falcosidekick-ui
+                port: { number: 2802 }
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: falco-ui-http
+  namespace: falco
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+    traefik.ingress.kubernetes.io/router.middlewares: falco-https-redirect@kubernetescrd
+spec:
+  rules:
+    - host: falco.20.219.189.234.nip.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: runtime-security-falcosidekick-ui
+                port: { number: 2802 }
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: https-redirect
+  namespace: falco
+spec:
+  redirectScheme:
+    scheme: https
+    permanent: true

@@ -1,0 +1,141 @@
+# Releases in flight, and whether they are going well.
+#
+# Argo Rollouts already decides for itself whether to promote — this is not a
+# control, it is the view of that decision being taken. The point is that a canary
+# stops being a claim in a document and becomes something visible while it happens:
+# two revisions serving at once, the analysis running, and the moment the release
+# either completes or is abandoned.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aegis-dashboard-releases
+  namespace: observability
+  labels:
+    grafana_dashboard: "1"
+data:
+  aegis-releases.json: |
+    {
+      "title": "AEGIS · Releases",
+      "uid": "aegis-releases",
+      "tags": ["aegis"],
+      "timezone": "Asia/Colombo",
+      "refresh": "10s",
+      "time": { "from": "now-3h", "to": "now" },
+      "panels": [
+        {
+          "type": "stat",
+          "title": "Releases in progress",
+          "description": "A rollout is in progress from the moment a new revision appears until the analysis has finished and traffic has fully moved.",
+          "gridPos": { "h": 4, "w": 5, "x": 0, "y": 0 },
+          "targets": [{ "expr": "sum(rollout_info{namespace=\"aegis\", phase=\"Progressing\"})", "refId": "A" }],
+          "fieldConfig": { "defaults": { "decimals": 0 } }
+        },
+        {
+          "type": "stat",
+          "title": "Paused awaiting a decision",
+          "description": "A canary pause, or a blue-green waiting to be promoted. Not a fault — this is the release holding still while it is judged.",
+          "gridPos": { "h": 4, "w": 5, "x": 5, "y": 0 },
+          "targets": [{ "expr": "sum(rollout_info{namespace=\"aegis\", phase=\"Paused\"})", "refId": "A" }],
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [{ "color": "green", "value": null }, { "color": "blue", "value": 1 }]
+              }
+            }
+          }
+        },
+        {
+          "type": "stat",
+          "title": "Degraded",
+          "description": "A release the analysis refused. Traffic is still on the previous revision, which is the gate working rather than failing — but it needs somebody to look at why.",
+          "gridPos": { "h": 4, "w": 5, "x": 10, "y": 0 },
+          "targets": [{ "expr": "sum(rollout_info{namespace=\"aegis\", phase=\"Degraded\"})", "refId": "A" }],
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }]
+              }
+            }
+          }
+        },
+        {
+          "type": "stat",
+          "title": "Healthy",
+          "description": "Out of nine: seven backend services released by canary, and the two entry points by blue-green.",
+          "gridPos": { "h": 4, "w": 4, "x": 15, "y": 0 },
+          "targets": [{ "expr": "sum(rollout_info{namespace=\"aegis\", phase=\"Healthy\"})", "refId": "A" }],
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [{ "color": "red", "value": null }, { "color": "orange", "value": 7 }, { "color": "green", "value": 9 }]
+              }
+            }
+          }
+        },
+        {
+          "type": "stat",
+          "title": "Analyses run",
+          "description": "Every completed release was gated on one of these. A failure here is a release that never finished rather than an incident someone had to notice.",
+          "gridPos": { "h": 4, "w": 5, "x": 19, "y": 0 },
+          "targets": [{ "expr": "sum(analysis_run_info{namespace=\"aegis\"})", "refId": "A" }],
+          "fieldConfig": { "defaults": { "decimals": 0 } }
+        },
+        {
+          "type": "timeseries",
+          "title": "Rollout phase over time",
+          "description": "Watch a release move through its steps: Progressing while the new revision comes up, Paused while the analysis runs, then Healthy — or Degraded, if the gate refused it.",
+          "gridPos": { "h": 9, "w": 24, "x": 0, "y": 4 },
+          "targets": [{
+            "expr": "sum by (name, phase) (rollout_info{namespace=\"aegis\"})",
+            "legendFormat": "{{name}} · {{phase}}", "refId": "A"
+          }],
+          "fieldConfig": { "defaults": { "custom": { "fillOpacity": 25, "lineWidth": 1, "drawStyle": "line", "stepBefore": true } } }
+        },
+        {
+          "type": "table",
+          "title": "What is deployed",
+          "description": "Every service, its strategy, and the phase it is in. Canary for the services that move money; blue-green for the gateway and the frontend, where a half-migrated state is most visible to a customer.",
+          "gridPos": { "h": 9, "w": 12, "x": 0, "y": 13 },
+          "targets": [{
+            "expr": "rollout_info{namespace=\"aegis\"}",
+            "format": "table", "instant": true, "refId": "A"
+          }],
+          "transformations": [{
+            "id": "organize",
+            "options": {
+              "excludeByName": { "Time": true, "Value": true, "job": true, "instance": true, "container": true, "endpoint": true, "namespace": true, "pod": true, "service": true, "__name__": true },
+              "renameByName": { "name": "Service", "strategy": "Strategy", "phase": "Phase" }
+            }
+          }]
+        },
+        {
+          "type": "timeseries",
+          "title": "The canary under test, against the stable version",
+          "description": "During a canary both are serving, and this is the comparison the gate is making — if the new revision fails more than five percent of its requests, the release is stopped and traffic stays where it was.",
+          "gridPos": { "h": 9, "w": 12, "x": 12, "y": 13 },
+          "targets": [
+            {
+              "expr": "sum by (service) (rate(http_requests_received_total{namespace=\"aegis\", service=~\".*-canary\", code=~\"5..\"}[2m])) / clamp_min(sum by (service) (rate(http_requests_received_total{namespace=\"aegis\", service=~\".*-canary\"}[2m])), 0.001)",
+              "legendFormat": "{{service}} (under test)", "refId": "A"
+            },
+            {
+              "expr": "sum(rate(http_requests_received_total{namespace=\"aegis\", service!~\".*-canary|.*-preview\", code=~\"5..\"}[2m])) / clamp_min(sum(rate(http_requests_received_total{namespace=\"aegis\", service!~\".*-canary|.*-preview\"}[2m])), 0.001)",
+              "legendFormat": "stable", "refId": "B"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit", "decimals": 3,
+              "custom": { "fillOpacity": 0, "lineWidth": 2 },
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 0.05 }] }
+            }
+          }
+        }
+      ]
+    }
