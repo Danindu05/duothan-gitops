@@ -83,7 +83,7 @@ spec:
               type: loki
               uid: loki
               access: proxy
-              url: http://loki.observability.svc:3100
+              url: http://logs-loki.observability.svc:3100
               jsonData:
                 maxLines: 1000
           sidecar:

@@ -155,7 +155,7 @@ spec:
 
               loki.write "default" {
                 endpoint {
-                  url = "http://loki.observability.svc:3100/loki/api/v1/push"
+                  url = "http://logs-loki.observability.svc:3100/loki/api/v1/push"
                 }
               }
           resources:
