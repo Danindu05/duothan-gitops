@@ -67,8 +67,6 @@ spec:
         # privileged work. It is the one workload here that legitimately needs
         # this — and the reason it is worth having is that it sees what every
         # other control cannot: what a container does once it is already running.
-        podSecurityContext:
-          hostNetwork: false
         securityContext:
           privileged: true
 
