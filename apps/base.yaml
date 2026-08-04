@@ -13,7 +13,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/Danindu05/duothan-gitops.git
+    repoURL: git@github.com:Danindu05/duothan-gitops.git
     targetRevision: main
     # Only the files directly in manifests/ — the subdirectories are owned by
     # the per-component Applications. Argo CD does not recurse by default, and
