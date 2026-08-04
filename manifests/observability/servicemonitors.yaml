@@ -1,0 +1,122 @@
+# Tells Prometheus where the platform's own metrics live.
+#
+# Without these it would only ever see the cluster — CPU, memory, restarts — which
+# says whether a pod is alive but nothing about whether it is doing its job. A
+# service can sit perfectly healthy by every infrastructure measure while returning
+# 500 to every customer, and that is exactly the release a rollout gate has to catch.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: aegis-dotnet-services
+  namespace: aegis
+  labels: { app.kubernetes.io/part-of: aegis }
+spec:
+  namespaceSelector:
+    matchNames: [aegis]
+  selector:
+    # Every .NET service publishes an active service on this port name; the canary
+    # services are selected too, which is what lets a release be judged separately
+    # from the version it is replacing.
+    matchLabels: { tier: banking }
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: aegis-fraud
+  namespace: aegis
+  labels: { app.kubernetes.io/part-of: aegis }
+spec:
+  namespaceSelector:
+    matchNames: [aegis]
+  selector:
+    matchLabels: { app: fraud }
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+---
+# Alerts on the things that mean customers are being hurt, rather than on the things
+# that are merely unusual. Each one names what a responder should do about it,
+# because an alert nobody knows how to answer trains people to ignore alerts.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: aegis-platform
+  namespace: aegis
+  labels: { app.kubernetes.io/part-of: aegis }
+spec:
+  groups:
+    - name: aegis.availability
+      rules:
+        - alert: ServiceErrorRateHigh
+          expr: |
+            sum by (service) (
+              rate(http_requests_received_total{code=~"5..", namespace="aegis"}[5m])
+            )
+            /
+            sum by (service) (
+              rate(http_requests_received_total{namespace="aegis"}[5m])
+            ) > 0.05
+          for: 5m
+          labels: { severity: critical }
+          annotations:
+            summary: "{{ $labels.service }} is failing more than 5% of requests"
+            description: >-
+              Sustained server errors mean customers are being refused. Check the
+              service's logs in Grafana, and if a release is in flight consider
+              aborting it — the previous version is still running.
+
+        - alert: ServiceLatencyHigh
+          expr: |
+            histogram_quantile(0.95,
+              sum by (service, le) (
+                rate(http_request_duration_seconds_bucket{namespace="aegis"}[5m])
+              )
+            ) > 2
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: "{{ $labels.service }} p95 response time is above two seconds"
+            description: >-
+              Slow enough that customers will believe the platform is broken even
+              though it is answering.
+
+        - alert: ServiceDown
+          expr: up{namespace="aegis"} == 0
+          for: 3m
+          labels: { severity: critical }
+          annotations:
+            summary: "{{ $labels.service }} is not answering Prometheus"
+            description: >-
+              The service has stopped reporting. If this is Tier 1, customers cannot
+              bank; the platform can be put into a reduced mode from the operations
+              console while it is investigated.
+
+        - alert: PodCrashLooping
+          expr: rate(kube_pod_container_status_restarts_total{namespace="aegis"}[15m]) * 3600 > 3
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: "{{ $labels.pod }} is restarting repeatedly"
+            description: >-
+              More than three restarts an hour. A sealed Vault does this to every
+              service at once — check that first before looking at the service.
+
+    - name: aegis.banking
+      rules:
+        - alert: FraudScoringUnavailable
+          expr: up{job=~".*fraud.*"} == 0
+          for: 5m
+          labels: { severity: warning }
+          annotations:
+            summary: "Fraud scoring is unreachable"
+            description: >-
+              Transfers are being screened by reduced rule-based limits rather than
+              the engine. Banking continues, but a scoring outage that lasts is a
+              window somebody could use.

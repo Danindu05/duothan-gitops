@@ -1,0 +1,35 @@
+# How Grafana is reached, and the rules Prometheus evaluates.
+#
+# Separate from the chart application so a chart upgrade cannot quietly drop the
+# route or the alerts — those are ours, not the chart's.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: observability-routes
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Danindu05/duothan-gitops.git
+    targetRevision: main
+    path: manifests/observability
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      # ServiceMonitor and PrometheusRule do not exist until the operator has
+      # installed its CRDs.
+      - SkipDryRunOnMissingResource=true
+    retry:
+      limit: 10
+      backoff: { duration: 20s, factor: 2, maxDuration: 5m }

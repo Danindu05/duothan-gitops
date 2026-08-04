@@ -58,3 +58,59 @@ spec:
                     resources:
                       requests: { cpu: 10m, memory: 16Mi }
                       limits: { memory: 64Mi }
+---
+# The gate the blueprint actually asks for: judge a release on what customers are
+# experiencing, not merely on whether the process is alive.
+#
+# A health endpoint answers 200 while the service returns 500 to every real request,
+# because answering "am I up" is the one thing a broken service can usually still do.
+# These two measurements come from the traffic itself — the share of requests failing,
+# and how long the slowest tenth are waiting — so a release that is technically
+# running but practically useless is caught and stopped.
+#
+# Both are evaluated against the canary revision alone. Averaging the new version
+# together with the stable one hides exactly the signal the gate exists to find.
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: canary-metrics
+  namespace: aegis
+spec:
+  args:
+    - name: service
+  metrics:
+    - name: error-rate
+      # Five readings a minute apart. Fewer would let a burst decide the release;
+      # more would keep customers on a bad version longer than necessary.
+      count: 5
+      interval: 60s
+      failureLimit: 1
+      # No traffic yet is not a pass. An empty result means the question could not
+      # be answered, and a gate that treats silence as approval is not a gate.
+      successCondition: len(result) > 0 && result[0] < 0.05
+      provider:
+        prometheus:
+          address: http://prometheus-operated.observability.svc:9090
+          query: |
+            sum(rate(http_requests_received_total{
+              service="{{args.service}}", code=~"5.."
+            }[2m]))
+            /
+            clamp_min(sum(rate(http_requests_received_total{
+              service="{{args.service}}"
+            }[2m])), 0.001)
+
+    - name: latency-p95
+      count: 5
+      interval: 60s
+      failureLimit: 1
+      successCondition: len(result) == 0 || result[0] < 2
+      provider:
+        prometheus:
+          address: http://prometheus-operated.observability.svc:9090
+          query: |
+            histogram_quantile(0.95,
+              sum by (le) (rate(http_request_duration_seconds_bucket{
+                service="{{args.service}}"
+              }[2m]))
+            )
