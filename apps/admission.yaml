@@ -44,13 +44,12 @@ spec:
           resources:
             requests: { cpu: 25m, memory: 96Mi }
             limits: { memory: 256Mi }
-        # If Kyverno itself is down, admission decisions should not silently pass.
-        # Ignore is chosen here regardless, because on a single node a failure of
-        # the policy engine would otherwise make the cluster unrecoverable — no pod
-        # could start, including Kyverno's own replacement.
-        config:
-          webhooks:
-            - failurePolicy: Ignore
+        # Admission failure policy is set per-policy rather than here — the chart
+        # expects a different shape for this key and rejects the override, which
+        # takes the whole install with it. The policies themselves carry it.
+        features:
+          policyExceptions:
+            enabled: false
   destination:
     server: https://kubernetes.default.svc
     namespace: kyverno
