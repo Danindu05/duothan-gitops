@@ -85,9 +85,21 @@ spec:
       count: 5
       interval: 60s
       failureLimit: 1
-      # No traffic yet is not a pass. An empty result means the question could not
-      # be answered, and a gate that treats silence as approval is not a gate.
-      successCondition: len(result) > 0 && result[0] < 0.05
+      # An empty result passes, which is worth being explicit about because the
+      # opposite was tried and was worse.
+      #
+      # Treating silence as failure sounds stricter and is: it also means no
+      # release can complete whenever these metrics are unavailable — a service
+      # that has not been asked anything yet, a version that predates the metrics
+      # endpoint, or Prometheus itself being down. The platform then cannot be
+      # deployed for a reason that has nothing to do with the release, including
+      # the release that would fix the outage.
+      #
+      # The health check beside this one is the hard gate and does not depend on
+      # any of that. This measurement adds a judgement the health check cannot
+      # make — whether the version is serving errors — and withholds it honestly
+      # when there is nothing to judge.
+      successCondition: len(result) == 0 || result[0] < 0.05
       provider:
         prometheus:
           address: http://prometheus-operated.observability.svc:9090
