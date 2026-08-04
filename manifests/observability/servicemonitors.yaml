@@ -14,10 +14,18 @@ spec:
   namespaceSelector:
     matchNames: [aegis]
   selector:
-    # Every .NET service publishes an active service on this port name; the canary
-    # services are selected too, which is what lets a release be judged separately
-    # from the version it is replacing.
-    matchLabels: { tier: banking }
+    # Named explicitly rather than matched on a shared label, because the label
+    # that looked shared sits on the Rollout and not on the Services it creates —
+    # a selector that matches nothing produces no targets, no error, and a metric
+    # gate that silently has nothing to judge.
+    #
+    # Both the active and the canary Service of each are selected, which is what
+    # lets a release be measured separately from the version it is replacing. The
+    # frontend is absent on purpose: it is nginx and serves no metrics.
+    matchExpressions:
+      - key: app
+        operator: In
+        values: [identity, account, transaction, payment, lending, platform, gateway]
   endpoints:
     - port: http
       path: /metrics
