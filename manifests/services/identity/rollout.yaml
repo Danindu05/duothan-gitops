@@ -46,7 +46,7 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: identity
-          image: danindu05/aegis-identity:sha-061df74
+          image: danindu05/aegis-identity:sha-edb1b85
           imagePullPolicy: IfNotPresent
           ports: [{ name: http, containerPort: 8080, protocol: TCP }]
           env:
