@@ -33,7 +33,7 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: danindu05/aegis-frontend:sha-b9a03b7
+          image: danindu05/aegis-frontend:sha-ec50660
           imagePullPolicy: IfNotPresent
           ports: [{ name: http, containerPort: 80, protocol: TCP }]
           volumeMounts:
