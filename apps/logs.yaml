@@ -1,0 +1,180 @@
+# Log aggregation.
+#
+# Metrics say something is wrong; logs say what. During an incident the two have to
+# be readable side by side, and searching them one pod at a time — while the pods
+# are being replaced by a rollout — is how detail gets lost exactly when it matters.
+#
+# Loki in single-binary mode with filesystem storage. Clustered Loki wants object
+# storage and several components, which on one node buys complexity rather than
+# durability.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: logs
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  project: default
+  source:
+    repoURL: https://grafana.github.io/helm-charts
+    chart: loki
+    targetRevision: 6.24.0
+    helm:
+      values: |
+        deploymentMode: SingleBinary
+        loki:
+          auth_enabled: false
+          commonConfig:
+            replication_factor: 1
+          storage:
+            type: filesystem
+          schemaConfig:
+            configs:
+              - from: "2024-04-01"
+                store: tsdb
+                object_store: filesystem
+                schema: v13
+                index:
+                  prefix: index_
+                  period: 24h
+          limits_config:
+            retention_period: 72h
+            # A service caught in a crash loop can produce a great deal very
+            # quickly. Rate limits keep one sick pod from filling the disk and
+            # taking the logs of everything else with it.
+            ingestion_rate_mb: 8
+            ingestion_burst_size_mb: 16
+            reject_old_samples: true
+            reject_old_samples_max_age: 24h
+          compactor:
+            retention_enabled: true
+            delete_request_store: filesystem
+        singleBinary:
+          replicas: 1
+          persistence:
+            enabled: true
+            size: 4Gi
+          resources:
+            requests: { cpu: 50m, memory: 256Mi }
+            limits: { memory: 640Mi }
+        # Everything below belongs to the clustered topology and would otherwise
+        # be scheduled with nothing to do.
+        backend: { replicas: 0 }
+        read: { replicas: 0 }
+        write: { replicas: 0 }
+        chunksCache:
+          enabled: false
+        resultsCache:
+          enabled: false
+        lokiCanary:
+          enabled: false
+        test:
+          enabled: false
+        gateway:
+          enabled: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff: { duration: 20s, factor: 2, maxDuration: 5m }
+---
+# Grafana Alloy — the collector that ships every pod's logs to Loki.
+#
+# Runs as a DaemonSet reading the container log files on the node, so a pod does
+# not have to cooperate to be observed. That matters during an incident: a service
+# that is failing to start has no chance to send its own logs anywhere.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: log-collector
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  project: default
+  source:
+    repoURL: https://grafana.github.io/helm-charts
+    chart: alloy
+    targetRevision: 0.10.1
+    helm:
+      values: |
+        alloy:
+          configMap:
+            content: |
+              // Find every pod on this node.
+              discovery.kubernetes "pods" {
+                role = "pod"
+              }
+
+              // Keep the labels an operator actually searches by — namespace,
+              // pod, container, and the app label the platform sets. Loki
+              // indexes labels, so a high-cardinality one here would cost far
+              // more than it explains.
+              discovery.relabel "pods" {
+                targets = discovery.kubernetes.pods.targets
+
+                rule {
+                  source_labels = ["__meta_kubernetes_namespace"]
+                  target_label  = "namespace"
+                }
+                rule {
+                  source_labels = ["__meta_kubernetes_pod_name"]
+                  target_label  = "pod"
+                }
+                rule {
+                  source_labels = ["__meta_kubernetes_pod_container_name"]
+                  target_label  = "container"
+                }
+                rule {
+                  source_labels = ["__meta_kubernetes_pod_label_app"]
+                  target_label  = "app"
+                }
+                rule {
+                  source_labels = ["__meta_kubernetes_pod_node_name"]
+                  target_label  = "node"
+                }
+              }
+
+              loki.source.kubernetes "pods" {
+                targets    = discovery.relabel.pods.output
+                forward_to = [loki.write.default.receiver]
+              }
+
+              loki.write "default" {
+                endpoint {
+                  url = "http://loki.observability.svc:3100/loki/api/v1/push"
+                }
+              }
+          resources:
+            requests: { cpu: 25m, memory: 96Mi }
+            limits: { memory: 256Mi }
+        controller:
+          type: daemonset
+        crds:
+          create: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff: { duration: 20s, factor: 2, maxDuration: 5m }

@@ -68,11 +68,63 @@ spec:
           resources:
             requests: { cpu: 25m, memory: 64Mi }
             limits: { memory: 256Mi }
+
+        # ── Auto-unseal ───────────────────────────────────────────────────
+        # Vault seals whenever it restarts, and a sealed vault holds no key
+        # material, so every service that reads a secret at boot fails with it.
+        # On a single node that means a reboot takes the whole platform down
+        # until somebody presents three shares by hand — correct behaviour for a
+        # vault, and unacceptable for a bank.
+        #
+        # This trades custodian control for availability, and the trade is real:
+        # the shares live in a Kubernetes Secret, so anyone who can read secrets
+        # in this namespace can open the vault. A production deployment would use
+        # cloud KMS auto-unseal instead, where no share exists to be read at all.
+        # The honest description of what runs here is "survives a reboot", not
+        # "guarded by five custodians who must agree".
+        #
+        # The secret is optional. Without it this container simply waits and the
+        # ceremony stays manual, so deleting the secret restores the stricter
+        # posture without changing anything else.
+        - name: unsealer
+          image: hashicorp/vault:1.17
+          command: [sh, -c]
+          args:
+            - |
+              while true; do
+                status=$(wget -qO- http://127.0.0.1:8200/v1/sys/seal-status 2>/dev/null)
+                case "$status" in
+                  *'"sealed":true'*)
+                    if [ -f /unseal/key1 ]; then
+                      echo "vault sealed — presenting custodian shares"
+                      for k in /unseal/key1 /unseal/key2 /unseal/key3; do
+                        [ -f "$k" ] && VAULT_ADDR=http://127.0.0.1:8200 \
+                          vault operator unseal "$(cat "$k")" >/dev/null 2>&1
+                      done
+                    else
+                      echo "vault sealed and no shares provided — waiting for a custodian"
+                    fi
+                    ;;
+                esac
+                sleep 10
+              done
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - { name: unseal, mountPath: /unseal, readOnly: true }
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 64Mi }
       volumes:
         - name: config
           configMap: { name: vault-config }
         - name: data
           persistentVolumeClaim: { claimName: vault-data }
+        - name: unseal
+          secret:
+            secretName: aegis-vault-unseal
+            optional: true
 ---
 apiVersion: v1
 kind: Service

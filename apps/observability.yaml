@@ -1,0 +1,138 @@
+# Metrics, alerting and dashboards.
+#
+# A banking recovery platform should not only deploy safely; it has to be able to
+# prove its health continuously, and to show afterwards what was true at the moment
+# something went wrong. Without this the rollout gate can only ask "does it answer",
+# which is a much weaker question than "is it answering correctly and quickly".
+#
+# kube-prometheus-stack brings Prometheus, Alertmanager, Grafana, kube-state-metrics
+# and node-exporter as one coherent set, already wired together. Assembling them
+# separately means owning the wiring, and the wiring is where these go wrong.
+#
+# Retention is deliberately short and storage small: this is a single node, and an
+# observability stack that fills the disk takes down the platform it was installed
+# to protect.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: observability
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  project: default
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: kube-prometheus-stack
+    targetRevision: 65.5.1
+    helm:
+      values: |
+        # ── Prometheus ────────────────────────────────────────────────────
+        prometheus:
+          prometheusSpec:
+            retention: 3d
+            retentionSize: 2GB
+            scrapeInterval: 30s
+            evaluationInterval: 30s
+            # Watch every namespace, not only the one the chart installed into,
+            # so a ServiceMonitor added beside a service is found without anyone
+            # remembering to update the operator.
+            serviceMonitorSelectorNilUsesHelmValues: false
+            podMonitorSelectorNilUsesHelmValues: false
+            ruleSelectorNilUsesHelmValues: false
+            storageSpec:
+              volumeClaimTemplate:
+                spec:
+                  accessModes: [ReadWriteOnce]
+                  resources:
+                    requests:
+                      storage: 4Gi
+            resources:
+              requests: { cpu: 100m, memory: 512Mi }
+              limits: { memory: 1400Mi }
+
+        # ── Alertmanager ──────────────────────────────────────────────────
+        alertmanager:
+          alertmanagerSpec:
+            retention: 48h
+            storage:
+              volumeClaimTemplate:
+                spec:
+                  accessModes: [ReadWriteOnce]
+                  resources:
+                    requests:
+                      storage: 1Gi
+            resources:
+              requests: { cpu: 10m, memory: 64Mi }
+              limits: { memory: 128Mi }
+
+        # ── Grafana ───────────────────────────────────────────────────────
+        grafana:
+          adminPassword: Aegis-Grafana-2026
+          defaultDashboardsTimezone: Asia/Colombo
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 320Mi }
+          # Loki is installed by a separate application, so its datasource is
+          # declared here rather than discovered — Grafana should come up already
+          # able to show logs beside metrics, not need wiring by hand afterwards.
+          additionalDataSources:
+            - name: Loki
+              type: loki
+              uid: loki
+              access: proxy
+              url: http://loki.observability.svc:3100
+              jsonData:
+                maxLines: 1000
+          sidecar:
+            dashboards:
+              enabled: true
+              searchNamespace: ALL
+              label: grafana_dashboard
+          grafana.ini:
+            server:
+              root_url: https://grafana.20.219.189.234.nip.io
+            analytics:
+              reporting_enabled: false
+              check_for_updates: false
+
+        # ── Exporters ─────────────────────────────────────────────────────
+        kube-state-metrics:
+          resources:
+            requests: { cpu: 10m, memory: 64Mi }
+            limits: { memory: 160Mi }
+
+        prometheus-node-exporter:
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 64Mi }
+
+        # k3s runs the control plane inside a single process, so these have no
+        # separate endpoints to scrape. Left enabled they produce permanently
+        # failing targets, and an alert that is always firing is an alert nobody
+        # reads.
+        kubeEtcd:
+          enabled: false
+        kubeControllerManager:
+          enabled: false
+        kubeScheduler:
+          enabled: false
+        kubeProxy:
+          enabled: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      # The bundled CRDs exceed the annotation size limit for a client-side apply.
+      - Replace=true
+    retry:
+      limit: 5
+      backoff: { duration: 20s, factor: 2, maxDuration: 5m }
