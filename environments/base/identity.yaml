@@ -1,0 +1,4 @@
+# Identity — everything else comes from the chart's defaults.
+name: identity
+databaseKey: Identity
+strategy: canary

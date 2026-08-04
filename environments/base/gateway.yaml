@@ -1,0 +1,5 @@
+# An entry point: blue-green, per blueprint 7.5.
+name: gateway
+strategy: blueGreen
+databaseKey: ""
+tier: edge

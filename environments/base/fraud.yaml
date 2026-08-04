@@ -1,0 +1,24 @@
+# The Python service. It shares none of the .NET configuration, listens on a
+# different port, and needs no database of its own.
+name: fraud
+strategy: canary
+port: 8000
+dotnet: false
+databaseKey: ""
+resources:
+  requests: { cpu: 100m, memory: 300Mi }
+  limits: { memory: 600Mi }
+probes:
+  path: /health
+  readiness: { initialDelaySeconds: 20, periodSeconds: 10, failureThreshold: 6 }
+  liveness: { initialDelaySeconds: 45, periodSeconds: 20, failureThreshold: 4 }
+canary:
+  steps:
+    - setWeight: 50
+    - pause: { duration: 60s }
+    - setWeight: 100
+    - pause: { duration: 30s }
+  # Health only. It publishes metrics, but sees traffic only when a transfer is
+  # screened, so a quiet minute would read as an absent signal rather than a
+  # healthy one.
+  analysis: [service-health]

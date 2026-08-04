@@ -1,0 +1,145 @@
+{{- $name := required "a service needs a name" .Values.name -}}
+{{- $repo := default (printf "aegis-%s" $name) .Values.image.repository -}}
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ $name }}
+    tier: {{ .Values.tier }}
+spec:
+  replicas: {{ .Values.replicas }}
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels: { app: {{ $name }} }
+  strategy:
+    {{- if eq .Values.strategy "canary" }}
+    # Money-moving services take a share of live traffic first, and continue only
+    # if they prove healthy carrying it. Weight is approximated by pod count —
+    # there is no service mesh here — so the pauses are what make this a canary
+    # rather than a rolling update: each is a point where analysis can stop it.
+    canary:
+      maxSurge: 1
+      maxUnavailable: 0
+      canaryService: {{ $name }}-canary
+      stableService: {{ $name }}
+      analysis:
+        startingStep: 1
+        templates:
+          {{- range .Values.canary.analysis }}
+          - templateName: {{ . }}
+          {{- end }}
+        args:
+          - { name: service, value: {{ $name }}-canary }
+          {{- if ne (int .Values.port) 8080 }}
+          - { name: port, value: "{{ .Values.port }}" }
+          {{- end }}
+      steps:
+{{ toYaml .Values.canary.steps | indent 8 }}
+    {{- else }}
+    # The entry points come up complete beside the running version and are
+    # exercised on a preview host before any traffic moves. These are where a
+    # half-migrated state is most visible, so they change over all at once.
+    blueGreen:
+      activeService: {{ $name }}
+      previewService: {{ $name }}-preview
+      autoPromotionEnabled: {{ .Values.blueGreen.autoPromotionEnabled }}
+      scaleDownDelaySeconds: {{ .Values.blueGreen.scaleDownDelaySeconds }}
+      prePromotionAnalysis:
+        templates:
+          {{- range .Values.blueGreen.analysis }}
+          - templateName: {{ . }}
+          {{- end }}
+        args:
+          - { name: service, value: {{ $name }}-preview }
+          {{- if ne (int .Values.port) 8080 }}
+          - { name: port, value: "{{ .Values.port }}" }
+          {{- end }}
+    {{- end }}
+  template:
+    metadata:
+      labels:
+        app: {{ $name }}
+        tier: {{ .Values.tier }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: {{ $name }}
+          image: {{ .Values.image.registry }}/{{ $repo }}:{{ .Values.image.tag }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - { name: http, containerPort: {{ .Values.port }}, protocol: TCP }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: [ALL] }
+          env:
+            {{- if .Values.dotnet }}
+            - { name: ASPNETCORE_ENVIRONMENT, value: Production }
+            - { name: ASPNETCORE_URLS, value: "http://+:{{ .Values.port }}" }
+            - { name: DOTNET_SYSTEM_NET_DISABLEIPV6, value: "1" }
+            # Workstation GC keeps each service near 70 MB rather than ~120 MB,
+            # which matters when nine of them share one node.
+            - { name: DOTNET_gcServer, value: "0" }
+            - { name: Vault__Address, value: "http://vault:8200" }
+            {{- range $svc, $addr := .Values.services }}
+            - { name: Services__{{ $svc }}, value: "{{ $addr }}" }
+            {{- end }}
+            - name: ConnectionStrings__RabbitMq
+              value: "rabbitmq://guest:guest@rabbitmq:5672/"
+            {{- if .Values.databaseKey }}
+            - name: ConnectionStrings__{{ .Values.databaseKey }}Db
+              valueFrom:
+                secretKeyRef: { name: aegis-databases, key: {{ lower .Values.databaseKey }} }
+            {{- end }}
+            - name: VAULT_ROLE_ID
+              valueFrom:
+                secretKeyRef: { name: aegis-vault-approle, key: role_id }
+            - name: VAULT_SECRET_ID
+              valueFrom:
+                secretKeyRef: { name: aegis-vault-approle, key: secret_id }
+            {{- end }}
+            {{- with .Values.env }}
+{{ toYaml . | indent 12 }}
+            {{- end }}
+          resources:
+{{ toYaml .Values.resources | indent 12 }}
+          readinessProbe:
+            httpGet: { path: {{ .Values.probes.path }}, port: http }
+{{ toYaml .Values.probes.readiness | indent 12 }}
+          livenessProbe:
+            httpGet: { path: {{ .Values.probes.path }}, port: http }
+{{ toYaml .Values.probes.liveness | indent 12 }}
+---
+# The stable service: what carries live traffic.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ $name }}
+    role: active
+spec:
+  selector: { app: {{ $name }} }
+  ports:
+    - { name: http, port: {{ .Values.port }}, targetPort: http }
+---
+# The second service selects only the revision under test, which is what lets a
+# release be measured separately from the version it is replacing. Averaging the
+# two together would hide the very signal the gate exists to find.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}-{{ if eq .Values.strategy "canary" }}canary{{ else }}preview{{ end }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ $name }}
+    role: {{ if eq .Values.strategy "canary" }}canary{{ else }}preview{{ end }}
+spec:
+  selector: { app: {{ $name }} }
+  ports:
+    - { name: http, port: {{ .Values.port }}, targetPort: http }

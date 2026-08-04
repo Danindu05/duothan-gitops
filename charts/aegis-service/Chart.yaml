@@ -1,0 +1,8 @@
+apiVersion: v2
+name: aegis-service
+description: >-
+  One AEGIS backend service — its progressive-delivery rollout, the services that
+  route to it, and the health gate that decides whether a release continues.
+type: application
+version: 1.0.0
+appVersion: "1.0"

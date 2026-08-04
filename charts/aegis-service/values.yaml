@@ -1,0 +1,69 @@
+# Defaults shared by every service. A per-service values file states only what
+# actually differs, which for most of them is a name, a database and a port.
+#
+# The nine rollouts this replaces were 902 lines, and any two of them differed by
+# about eight. Duplication at that ratio is not redundancy, it is nine chances to
+# fix something in eight places.
+
+name: ""                       # required
+image:
+  registry: ghcr.io/danindu05
+  repository: ""               # defaults to aegis-<name>
+  tag: latest
+  pullPolicy: IfNotPresent
+
+replicas: 2
+port: 8080
+tier: banking
+
+# Which database secret key this service reads, if any.
+databaseKey: ""
+
+# ── Progressive delivery ────────────────────────────────────────────────────
+# canary for the services that move money, blueGreen for the entry points.
+strategy: canary
+
+canary:
+  steps:
+    - setWeight: 50
+    - pause: { duration: 60s }
+    - setWeight: 100
+    - pause: { duration: 30s }
+  # Both gates: one catches a version that will not start, the other one that
+  # starts and then serves errors.
+  analysis:
+    - service-health
+    - canary-metrics
+
+blueGreen:
+  autoPromotionEnabled: false
+  scaleDownDelaySeconds: 60
+  analysis:
+    - service-health
+
+# ── Runtime ─────────────────────────────────────────────────────────────────
+resources:
+  requests: { cpu: 50m, memory: 160Mi }
+  limits: { memory: 400Mi }
+
+probes:
+  path: /health
+  readiness: { initialDelaySeconds: 25, periodSeconds: 10, failureThreshold: 6 }
+  liveness: { initialDelaySeconds: 60, periodSeconds: 20, failureThreshold: 4 }
+
+# Extra environment beyond the shared defaults every .NET service gets.
+env: []
+
+# Set for the Python service, which shares none of the .NET configuration.
+dotnet: true
+
+# Where each service finds the others. Shared rather than repeated so a service
+# that moves is corrected once instead of nine times.
+services:
+  Identity: http://identity:8080
+  Account: http://account:8080
+  Transaction: http://transaction:8080
+  Payment: http://payment:8080
+  Lending: http://lending:8080
+  Platform: http://platform:8080
+  Fraud: http://fraud:8000

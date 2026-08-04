@@ -1,0 +1,18 @@
+# What production adds on top of the shared definition.
+#
+# This is the split the blueprint asks for: the chart packages what a service *is*,
+# and this states what is true of it *here*. Keeping them apart is what stops an
+# environment-specific decision — a registry, a replica count, a resource ceiling —
+# from being baked into the definition every environment shares.
+#
+# Deliberately thin. An overlay that restates the whole service is not an overlay,
+# and it reintroduces the duplication the chart removed.
+
+image:
+  registry: ghcr.io/danindu05
+  pullPolicy: IfNotPresent
+
+# Two replicas: enough for a canary to mean something (one carries the new
+# revision while one carries the stable), and as many as one node should hold
+# nine times over.
+replicas: 2

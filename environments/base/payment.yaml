@@ -1,0 +1,4 @@
+# Payment — everything else comes from the chart's defaults.
+name: payment
+databaseKey: Payment
+strategy: canary

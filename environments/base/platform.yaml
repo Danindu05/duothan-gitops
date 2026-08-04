@@ -1,0 +1,4 @@
+# Platform — everything else comes from the chart's defaults.
+name: platform
+databaseKey: Platform
+strategy: canary

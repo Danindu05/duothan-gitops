@@ -1,0 +1,14 @@
+# The other entry point. nginx rather than .NET, and it serves no metrics.
+name: frontend
+strategy: blueGreen
+port: 80
+dotnet: false
+databaseKey: ""
+tier: edge
+resources:
+  requests: { cpu: 25m, memory: 48Mi }
+  limits: { memory: 128Mi }
+probes:
+  path: /
+  readiness: { initialDelaySeconds: 5, periodSeconds: 10, failureThreshold: 3 }
+  liveness: { initialDelaySeconds: 20, periodSeconds: 20, failureThreshold: 3 }

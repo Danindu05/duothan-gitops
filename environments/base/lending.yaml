@@ -1,0 +1,4 @@
+# Lending — everything else comes from the chart's defaults.
+name: lending
+databaseKey: Lending
+strategy: canary
