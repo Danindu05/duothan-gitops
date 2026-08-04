@@ -42,6 +42,18 @@ spec:
         driver:
           enabled: true
           kind: modern_ebpf
+          modernEbpf:
+            # A smaller ring buffer than the 8 MB default.
+            #
+            # The kernel supports this properly — BTF is present and the bpf
+            # syscall is enabled — but allocation was failing at scap_init on a
+            # two-core node with a modest memory ceiling. Buffers are locked
+            # memory, so asking for less is the difference between a sensor that
+            # starts and one that does not. Preset 2 is 2 MB per buffer; the cost
+            # is that a burst of syscalls can drop events, which the drop counter
+            # below reports rather than hides.
+            bufSizePreset: 2
+            cpusForEachBuffer: 2
 
         collectors:
           kubernetes:
@@ -61,7 +73,8 @@ spec:
 
         resources:
           requests: { cpu: 100m, memory: 256Mi }
-          limits: { memory: 640Mi }
+          # Room for the ring buffers, which are locked and counted against this.
+          limits: { memory: 1Gi }
 
         # Falco watches syscalls for the whole node, which is inherently
         # privileged work. It is the one workload here that legitimately needs
