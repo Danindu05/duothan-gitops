@@ -1,4 +1,9 @@
-# Loans and repayments
+# Lending, rendered from the shared chart rather than a hand-written manifest.
+#
+# Switched first, and alone, because it is Tier 3: the tier the platform sheds
+# first under load, so it is the service whose disruption costs least. If the
+# chart and the hand-written manifest disagree about anything, this is where that
+# should surface.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -7,15 +12,22 @@ metadata:
   finalizers:
     - resources-finalizer.argocd.argoproj.io
   annotations:
-    # Lower waves run first: namespace and secrets, then infrastructure, then
-    # the services that depend on them.
     argocd.argoproj.io/sync-wave: "3"
 spec:
   project: default
   source:
     repoURL: git@github.com:Danindu05/duothan-gitops.git
     targetRevision: main
-    path: manifests/services/lending
+    path: charts/aegis-service
+    helm:
+      valueFiles:
+        - ../../environments/base/lending.yaml
+        - ../../environments/production/values.yaml
+      parameters:
+        - name: image.registry
+          value: danindu05
+        - name: image.tag
+          value: sha-e21d882
   destination:
     server: https://kubernetes.default.svc
     namespace: aegis
@@ -28,4 +40,4 @@ spec:
       - ServerSideApply=true
     retry:
       limit: 5
-      backoff: { duration: 10s, factor: 2, maxDuration: 3m }
+      backoff: { duration: 15s, factor: 2, maxDuration: 3m }
