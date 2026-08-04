@@ -27,21 +27,21 @@ spec:
     targetRevision: 4.11.0
     helm:
       values: |
-        # The legacy eBPF probe rather than modern_ebpf.
+        # Modern eBPF, and no driver to obtain at all.
         #
-        # modern_ebpf needs CO-RE and a set of capabilities this kernel would not
-        # give it — the probe failed at scap_init and the pod crash-looped. The
-        # legacy probe is downloaded for the running kernel and asks for less, at
-        # the cost of an init container that has to fetch it. Working detection on
-        # an older mechanism beats a modern one that never starts.
+        # The legacy probe was tried first and cannot work here: there is no
+        # prebuilt driver published for this kernel (6.17 on Azure returns 404),
+        # so the loader falls back to compiling one, which wants kernel headers
+        # and more memory than the init container had — it was killed for
+        # overrunning its limit.
+        #
+        # modern_ebpf needs none of that. It failed earlier for a different reason:
+        # the probe could not initialise without privileges, which the chart's
+        # defaults withhold. With those granted below, the mechanism that needs no
+        # driver is also the one this kernel supports properly.
         driver:
           enabled: true
-          kind: ebpf
-          loader:
-            initContainer:
-              resources:
-                requests: { cpu: 50m, memory: 128Mi }
-                limits: { memory: 512Mi }
+          kind: modern_ebpf
 
         collectors:
           kubernetes:
