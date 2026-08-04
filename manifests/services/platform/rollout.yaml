@@ -24,7 +24,9 @@ spec:
       maxSurge: 1
       maxUnavailable: 0
       analysis:
-        templates: [{ templateName: service-health }]
+        templates:
+          - { templateName: service-health }
+          - { templateName: canary-metrics }
         args: [{ name: service, value: platform-canary }]
         startingStep: 1
       canaryService: platform-canary
@@ -44,7 +46,7 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: platform
-          image: danindu05/aegis-platform:sha-5e7b528
+          image: danindu05/aegis-platform:sha-061df74
           imagePullPolicy: IfNotPresent
           ports: [{ name: http, containerPort: 8080, protocol: TCP }]
           env:

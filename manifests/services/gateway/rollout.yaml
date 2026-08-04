@@ -31,7 +31,7 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: gateway
-          image: danindu05/aegis-gateway:sha-5e7b528
+          image: danindu05/aegis-gateway:sha-061df74
           imagePullPolicy: IfNotPresent
           ports: [{ name: http, containerPort: 8080, protocol: TCP }]
           env:
