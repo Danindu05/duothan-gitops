@@ -1,0 +1,100 @@
+# Kyverno — the check between "committed to Git" and "running in the cluster".
+#
+# Argo CD guarantees that what runs matches what is in the repository. It does not
+# guarantee that the image the repository names is the one this project built. A tag
+# can be repointed, a registry account can be taken, and a manifest can be edited to
+# name something else entirely — and each of those produces a cluster that is
+# perfectly in sync with Git while running somebody else's code.
+#
+# Admission control is where that gap closes: an image without a signature from this
+# repository's build workflow is refused entry, whatever the manifest says.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: admission
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  project: default
+  source:
+    repoURL: https://kyverno.github.io/kyverno
+    chart: kyverno
+    targetRevision: 3.3.4
+    helm:
+      values: |
+        # One replica of each: this is a single node, and three would simply be
+        # three copies waiting on the same machine.
+        admissionController:
+          replicas: 1
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 384Mi }
+        backgroundController:
+          resources:
+            requests: { cpu: 25m, memory: 64Mi }
+            limits: { memory: 192Mi }
+        cleanupController:
+          resources:
+            requests: { cpu: 10m, memory: 64Mi }
+            limits: { memory: 128Mi }
+        reportsController:
+          resources:
+            requests: { cpu: 25m, memory: 96Mi }
+            limits: { memory: 256Mi }
+        # If Kyverno itself is down, admission decisions should not silently pass.
+        # Ignore is chosen here regardless, because on a single node a failure of
+        # the policy engine would otherwise make the cluster unrecoverable — no pod
+        # could start, including Kyverno's own replacement.
+        config:
+          webhooks:
+            - failurePolicy: Ignore
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kyverno
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - Replace=true
+    retry:
+      limit: 5
+      backoff: { duration: 20s, factor: 2, maxDuration: 5m }
+---
+# The policies themselves, kept apart from the engine so a chart upgrade cannot
+# quietly drop them.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: admission-policies
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:Danindu05/duothan-gitops.git
+    targetRevision: main
+    path: manifests/admission
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kyverno
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      # ClusterPolicy does not exist until Kyverno has installed its CRDs.
+      - SkipDryRunOnMissingResource=true
+    retry:
+      limit: 10
+      backoff: { duration: 20s, factor: 2, maxDuration: 5m }

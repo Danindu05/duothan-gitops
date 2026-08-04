@@ -1,0 +1,167 @@
+# Falco — watching what containers actually do, once they are already running.
+#
+# Everything else in this pipeline judges code before it runs: tests, scanners,
+# signatures, admission policy. All of it is reasoning about an artefact. Runtime
+# detection is the only layer that sees behaviour, and behaviour is where an attack
+# eventually has to show itself.
+#
+# This is the control the blueprint argues for most directly. The Super Malware
+# Agent was unknown when it struck, so nothing matching on signatures could have
+# recognised it — but it still had to do recognisable things: open a shell inside a
+# container, read credentials, reach somewhere it had no business reaching. Falco
+# watches for the doing rather than the identity.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: runtime-security
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  project: default
+  source:
+    repoURL: https://falcosecurity.github.io/charts
+    chart: falco
+    targetRevision: 4.11.0
+    helm:
+      values: |
+        # Modern eBPF: the probe runs in the kernel's own sandboxed VM, so there is
+        # no module to compile against the running kernel and nothing privileged
+        # loaded into it. On a managed VM that is the difference between working
+        # after a kernel upgrade and not.
+        driver:
+          enabled: true
+          kind: modern_ebpf
+
+        collectors:
+          kubernetes:
+            enabled: true
+
+        # Rules are matched against a lot of syscalls. Leaving buffering on trades
+        # a little latency for a great deal less CPU, which matters on two cores.
+        falco:
+          json_output: true
+          json_include_output_property: true
+          priority: notice
+          buffered_outputs: true
+          syscall_event_drops:
+            actions: [log]
+            rate: 0.03
+            max_burst: 100
+
+        resources:
+          requests: { cpu: 100m, memory: 256Mi }
+          limits: { memory: 640Mi }
+
+        # ── Where alerts go ───────────────────────────────────────────────
+        # Falcosidekick fans events out; its UI is what makes them readable by
+        # somebody who is not tailing a log at three in the morning.
+        falcosidekick:
+          enabled: true
+          replicaCount: 1
+          resources:
+            requests: { cpu: 25m, memory: 64Mi }
+            limits: { memory: 160Mi }
+          config:
+            # Alerts land beside every other metric, so a runtime event and a spike
+            # in failed transfers can be looked at on one screen.
+            prometheus:
+              extralabels: "platform:aegis"
+          webui:
+            enabled: true
+            replicaCount: 1
+            resources:
+              requests: { cpu: 25m, memory: 96Mi }
+              limits: { memory: 256Mi }
+            redis:
+              resources:
+                requests: { cpu: 25m, memory: 96Mi }
+                limits: { memory: 256Mi }
+
+        # Let Prometheus scrape Falco itself, so "is the detection running" is a
+        # question with an answer. A silent sensor and a quiet system look identical.
+        serviceMonitor:
+          enabled: true
+          interval: 30s
+
+        # ── Rules that matter here in particular ──────────────────────────
+        customRules:
+          aegis-rules.yaml: |-
+            - macro: aegis_namespace
+              condition: (k8s.ns.name = "aegis")
+
+            - rule: Shell opened in a banking container
+              desc: >-
+                Nothing in these images needs an interactive shell. Every service is
+                a compiled binary or a Python process started by its entrypoint, so a
+                shell means either somebody debugging in production or somebody who
+                should not be there. Both are worth knowing about immediately.
+              condition: >-
+                spawned_process and container and aegis_namespace
+                and proc.name in (bash, sh, ash, dash, zsh, ksh, csh)
+              output: >-
+                Shell opened inside a banking container
+                (user=%user.name container=%container.name image=%container.image.repository
+                command=%proc.cmdline pod=%k8s.pod.name)
+              priority: WARNING
+              tags: [aegis, shell, mitre_execution]
+
+            - rule: Reconnaissance tooling in a banking container
+              desc: >-
+                These images ship no network tooling. Something that fetches or
+                probes appearing inside one means a process is doing work the image
+                was never built to do.
+              condition: >-
+                spawned_process and container and aegis_namespace
+                and proc.name in (nc, ncat, netcat, nmap, socat, tcpdump, curl, wget, ssh, scp)
+              output: >-
+                Network tool run inside a banking container
+                (tool=%proc.name container=%container.name command=%proc.cmdline
+                pod=%k8s.pod.name)
+              priority: WARNING
+              tags: [aegis, network, mitre_discovery]
+
+            - rule: Credential material read in a banking container
+              desc: >-
+                Reading the service account token or the container's own secrets is
+                the step between a foothold and moving sideways through the cluster.
+              condition: >-
+                open_read and container and aegis_namespace
+                and (fd.name startswith /var/run/secrets/kubernetes.io/serviceaccount
+                     or fd.name startswith /run/secrets)
+                and not proc.name in (dotnet, python3, uvicorn, vault)
+              output: >-
+                Credential material read inside a banking container
+                (file=%fd.name process=%proc.name container=%container.name
+                pod=%k8s.pod.name)
+              priority: CRITICAL
+              tags: [aegis, secrets, mitre_credential_access]
+
+            - rule: Vault data touched by something other than Vault
+              desc: >-
+                The vault's storage holds the platform's key material. Only Vault
+                itself has any reason to open it.
+              condition: >-
+                open_read and container and aegis_namespace
+                and fd.name startswith /vault/data
+                and not proc.name = vault
+              output: >-
+                Vault storage read by an unexpected process
+                (file=%fd.name process=%proc.name container=%container.name)
+              priority: CRITICAL
+              tags: [aegis, vault, mitre_credential_access]
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: falco
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff: { duration: 20s, factor: 2, maxDuration: 5m }

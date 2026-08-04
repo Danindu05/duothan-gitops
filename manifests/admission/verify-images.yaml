@@ -1,0 +1,82 @@
+# Only images this project built and signed may run.
+#
+# The signature is checked against who produced it, not against a key somebody
+# holds. Cosign signed keylessly during the build: the certificate names the
+# workflow, the repository and the ref, and the record went to Rekor, the public
+# transparency log. So the question asked here is not "was this signed" — anyone
+# can sign anything — but "was this signed by that workflow, in that repository".
+#
+# What it stops: a tag repointed at something else, a compromised registry account
+# serving a different image under a familiar name, or a manifest edited to name an
+# image nobody here built. In each case Argo CD would report the cluster perfectly
+# in sync with Git, because it is: Git names the image, and the image is not ours.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: verify-aegis-images
+  annotations:
+    policies.kyverno.io/title: Only run images built and signed by this project
+    policies.kyverno.io/category: Supply chain
+    policies.kyverno.io/severity: critical
+spec:
+  validationFailureAction: Enforce
+  background: false
+  # A pod that cannot prove where it came from does not run, but the platform is
+  # not taken down to make that point: the rule applies to the banking namespace,
+  # where the code that touches money lives. Infrastructure installed from public
+  # charts is out of scope — those are signed by their own publishers, if at all.
+  rules:
+    - name: aegis-images-must-be-signed
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [aegis]
+      verifyImages:
+        - imageReferences:
+            - "ghcr.io/danindu05/aegis-*"
+          mutateDigest: true
+          # Rewrites the tag to the digest that was verified. Without this, a tag
+          # could be repointed after admission and the next pull would fetch
+          # something the check never saw.
+          verifyDigest: true
+          required: true
+          attestors:
+            - count: 1
+              entries:
+                - keyless:
+                    subject: "https://github.com/Danindu05/duothan-6.0/.github/workflows/build-and-publish.yml@refs/heads/main"
+                    issuer: "https://token.actions.githubusercontent.com"
+                    rekor:
+                      url: https://rekor.sigstore.dev
+---
+# An image named by a tag alone is a moving target: the same manifest can mean
+# different things on different days, and neither a rollback nor an audit can say
+# what was actually running. The rule above rewrites verified images to a digest;
+# this one keeps anything else from arriving with `latest` and no signature at all.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-latest-tag
+  annotations:
+    policies.kyverno.io/title: Images must name a version, not `latest`
+    policies.kyverno.io/category: Supply chain
+    policies.kyverno.io/severity: medium
+spec:
+  validationFailureAction: Audit
+  background: true
+  rules:
+    - name: no-latest
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [aegis]
+      validate:
+        message: >-
+          An image tagged `latest` cannot be rolled back to and cannot be told apart
+          from any other `latest`. Name the commit it was built from.
+        pattern:
+          spec:
+            containers:
+              - image: "!*:latest"
