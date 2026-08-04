@@ -92,6 +92,11 @@ spec:
         # somebody who is not tailing a log at three in the morning.
         falcosidekick:
           enabled: true
+          # Falco addresses the collector as <falco-fullname>-falcosidekick, while
+          # the subchart names itself after the release. The two disagreed, so every
+          # event failed to post — the detections were happening and reaching
+          # nobody, which is the same as not detecting them.
+          fullnameOverride: runtime-security-falco-falcosidekick
           replicaCount: 1
           resources:
             requests: { cpu: 25m, memory: 64Mi }
@@ -144,9 +149,18 @@ spec:
                 These images ship no network tooling. Something that fetches or
                 probes appearing inside one means a process is doing work the image
                 was never built to do.
+
+                The vault unsealer is exempt, and the exemption is narrow on
+                purpose: that container polls the vault's own seal status on
+                localhost, which is the one place a fetch here is expected. It was
+                caught by this rule on the first day the sensor ran — a true
+                positive against our own design — and the honest response to a
+                detection that is correct but unwanted is to name the exception
+                rather than widen the rule until it stops firing.
               condition: >-
                 spawned_process and container and aegis_namespace
                 and proc.name in (nc, ncat, netcat, nmap, socat, tcpdump, curl, wget, ssh, scp)
+                and not (container.name = "unsealer" and proc.cmdline contains "127.0.0.1:8200")
               output: >-
                 Network tool run inside a banking container
                 (tool=%proc.name container=%container.name command=%proc.cmdline
