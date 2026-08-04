@@ -46,7 +46,7 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: lending
-          image: danindu05/aegis-lending:sha-e21d882
+          image: danindu05/aegis-lending:sha-b9a03b7
           imagePullPolicy: IfNotPresent
           ports: [{ name: http, containerPort: 8080, protocol: TCP }]
           env:

@@ -43,7 +43,7 @@ spec:
     spec:
       containers:
         - name: fraud
-          image: danindu05/aegis-fraud:sha-e21d882
+          image: danindu05/aegis-fraud:sha-b9a03b7
           imagePullPolicy: IfNotPresent
           ports: [{ name: http, containerPort: 8000, protocol: TCP }]
           resources:
