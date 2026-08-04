@@ -16,6 +16,22 @@ spec:
     repoURL: git@github.com:Danindu05/duothan-gitops.git
     targetRevision: main
     path: manifests/services/payment
+  # Argo Rollouts owns the traffic-steering half of these Services. During a
+  # release it writes a pod-template-hash into their selector so the stable and
+  # canary services point at the right revision, and it removes it afterwards.
+  #
+  # Argo CD reads that as drift from the manifest, reverts it, and the controller
+  # writes it straight back — the two take turns undoing each other, which shows
+  # as a service flickering between Synced and OutOfSync forever and, worse, can
+  # briefly point live traffic at the wrong revision mid-release.
+  #
+  # The selector is the rollout controller's to write. Everything else about these
+  # Services is still ours.
+  ignoreDifferences:
+    - group: ""
+      kind: Service
+      jsonPointers:
+        - /spec/selector
   destination:
     server: https://kubernetes.default.svc
     namespace: aegis
