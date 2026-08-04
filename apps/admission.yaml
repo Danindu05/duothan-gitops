@@ -81,6 +81,19 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: kyverno
+  # Kyverno fills in defaults on its own policies once it has admitted them —
+  # rule ordering, match blocks it expands, an auto-generated rule for each
+  # workload kind. Argo sees the result as drift and would revert it forever,
+  # and the two would take turns undoing each other. The policy is what we wrote;
+  # what Kyverno derives from it is Kyverno's business.
+  ignoreDifferences:
+    - group: kyverno.io
+      kind: ClusterPolicy
+      jsonPointers:
+        - /spec/rules
+        - /spec/background
+        - /spec/admission
+        - /status
   syncPolicy:
     automated:
       prune: true

@@ -200,6 +200,16 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: falco
+  # The chart generates fresh credentials for the UI and its redis on every
+  # render, so each comparison finds a difference that is not one. Left alone
+  # this rewrites the passwords on every sync and restarts the UI with them.
+  ignoreDifferences:
+    - kind: Secret
+      name: runtime-security-falco-falcosidekick-ui
+      jsonPointers: [/data]
+    - kind: Secret
+      name: runtime-security-falco-falcosidekick-ui-redis
+      jsonPointers: [/data]
   syncPolicy:
     automated:
       prune: false
