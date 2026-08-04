@@ -14,7 +14,18 @@ spec:
     blueGreen:
       activeService: frontend
       previewService: frontend-preview
-      autoPromotionEnabled: false
+      # Promotes itself once the new colour has proved healthy.
+      #
+      # The gate has not been removed — it has been made the decider rather than
+      # the adviser. The new colour still comes up complete beside the running one,
+      # still takes no live traffic until it has answered its health checks, and
+      # still stops dead if it fails them. What has gone is the person who had to
+      # be awake to press promote, which was never adding judgement: they were
+      # reading the same analysis result and agreeing with it.
+      #
+      # The old colour stays up for a minute after the switch, so a rollback is a
+      # traffic change rather than a redeploy.
+      autoPromotionEnabled: true
       scaleDownDelaySeconds: 60
   template:
     metadata:

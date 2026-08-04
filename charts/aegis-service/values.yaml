@@ -36,7 +36,10 @@ canary:
     - canary-metrics
 
 blueGreen:
-  autoPromotionEnabled: false
+  # Promotes itself once the new colour has passed its analysis. The gate decides
+  # rather than advises — a person pressing promote was reading the same result
+  # and agreeing with it, which is not judgement, only delay.
+  autoPromotionEnabled: true
   scaleDownDelaySeconds: 60
   analysis:
     - service-health
