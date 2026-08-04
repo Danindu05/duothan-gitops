@@ -24,7 +24,7 @@ spec:
   source:
     repoURL: https://falcosecurity.github.io/charts
     chart: falco
-    targetRevision: 4.11.0
+    targetRevision: 9.1.0
     helm:
       values: |
         # Modern eBPF, and no driver to obtain at all.
@@ -39,6 +39,10 @@ spec:
         # the probe could not initialise without privileges, which the chart's
         # defaults withhold. With those granted below, the mechanism that needs no
         # driver is also the one this kernel supports properly.
+        # Falco 0.44 rather than 0.39. The buffer settings were applied correctly
+        # and the kernel has everything the mechanism needs — BTF, the bpf syscall,
+        # privileges — so what was left was the driver itself not knowing this
+        # kernel. 6.17 is newer than the release that was pinned here.
         driver:
           enabled: true
           kind: modern_ebpf
