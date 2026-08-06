@@ -21,11 +21,15 @@ spec:
     #
     # Both the active and the canary Service of each are selected, which is what
     # lets a release be measured separately from the version it is replacing. The
-    # frontend is absent on purpose: it is nginx and serves no metrics.
+    # frontend is absent on purpose: it is nginx and serves no metrics. The
+    # gateway is absent for the same reason: YARP carries no instrumentation, so
+    # scraping it produced four targets that could never answer — and a
+    # ServiceDown alert that fired forever, which is how real alerts get ignored.
+    # Its releases are blue-green, judged by service-health, not by these metrics.
     matchExpressions:
       - key: app
         operator: In
-        values: [identity, account, transaction, payment, lending, platform, gateway]
+        values: [identity, account, transaction, payment, lending, platform]
   endpoints:
     - port: http
       path: /metrics
