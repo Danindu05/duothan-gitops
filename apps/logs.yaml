@@ -119,7 +119,7 @@ spec:
                 role = "pod"
               }
 
-              // Keep the labels an operator actually searches by — namespace,
+              // Keep the labels an operator actually searches by - namespace,
               // pod, container, and the app label the platform sets. Loki
               // indexes labels, so a high-cardinality one here would cost far
               // more than it explains.

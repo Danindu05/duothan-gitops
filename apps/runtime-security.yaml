@@ -32,7 +32,7 @@ spec:
         # The legacy probe was tried first and cannot work here: there is no
         # prebuilt driver published for this kernel (6.17 on Azure returns 404),
         # so the loader falls back to compiling one, which wants kernel headers
-        # and more memory than the init container had — it was killed for
+        # and more memory than the init container had - it was killed for
         # overrunning its limit.
         #
         # modern_ebpf needs none of that. It failed earlier for a different reason:
@@ -40,8 +40,8 @@ spec:
         # defaults withhold. With those granted below, the mechanism that needs no
         # driver is also the one this kernel supports properly.
         # Falco 0.44 rather than 0.39. The buffer settings were applied correctly
-        # and the kernel has everything the mechanism needs — BTF, the bpf syscall,
-        # privileges — so what was left was the driver itself not knowing this
+        # and the kernel has everything the mechanism needs - BTF, the bpf syscall,
+        # privileges - so what was left was the driver itself not knowing this
         # kernel. 6.17 is newer than the release that was pinned here.
         driver:
           enabled: true
@@ -49,8 +49,8 @@ spec:
           modernEbpf:
             # A smaller ring buffer than the 8 MB default.
             #
-            # The kernel supports this properly — BTF is present and the bpf
-            # syscall is enabled — but allocation was failing at scap_init on a
+            # The kernel supports this properly - BTF is present and the bpf
+            # syscall is enabled - but allocation was failing at scap_init on a
             # two-core node with a modest memory ceiling. Buffers are locked
             # memory, so asking for less is the difference between a sensor that
             # starts and one that does not. Preset 2 is 2 MB per buffer; the cost
@@ -82,19 +82,19 @@ spec:
 
         # Falco watches syscalls for the whole node, which is inherently
         # privileged work. It is the one workload here that legitimately needs
-        # this — and the reason it is worth having is that it sees what every
+        # this - and the reason it is worth having is that it sees what every
         # other control cannot: what a container does once it is already running.
         securityContext:
           privileged: true
 
-        # ── Where alerts go ───────────────────────────────────────────────
+        # -- Where alerts go -----------------------------------------------
         # Falcosidekick fans events out; its UI is what makes them readable by
         # somebody who is not tailing a log at three in the morning.
         falcosidekick:
           enabled: true
           # Falco addresses the collector as <falco-fullname>-falcosidekick, while
           # the subchart names itself after the release. The two disagreed, so every
-          # event failed to post — the detections were happening and reaching
+          # event failed to post - the detections were happening and reaching
           # nobody, which is the same as not detecting them.
           fullnameOverride: runtime-security-falco-falcosidekick
           replicaCount: 1
@@ -103,7 +103,7 @@ spec:
             limits: { memory: 160Mi }
           # No extra Prometheus labels configured. The label syntax this expects
           # is not the one it documents, and getting it wrong panics the process at
-          # start-up rather than being ignored — the events reaching the UI matter
+          # start-up rather than being ignored - the events reaching the UI matter
           # more than tagging the metrics about them.
           webui:
             enabled: true
@@ -122,7 +122,7 @@ spec:
           enabled: true
           interval: 30s
 
-        # ── Rules that matter here in particular ──────────────────────────
+        # -- Rules that matter here in particular --------------------------
         customRules:
           aegis-rules.yaml: |-
             - macro: aegis_namespace
@@ -153,8 +153,8 @@ spec:
                 The vault unsealer is exempt, and the exemption is narrow on
                 purpose: that container polls the vault's own seal status on
                 localhost, which is the one place a fetch here is expected. It was
-                caught by this rule on the first day the sensor ran — a true
-                positive against our own design — and the honest response to a
+                caught by this rule on the first day the sensor ran - a true
+                positive against our own design - and the honest response to a
                 detection that is correct but unwanted is to name the exception
                 rather than widen the rule until it stops firing.
               condition: >-
