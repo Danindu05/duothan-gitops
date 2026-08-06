@@ -27,8 +27,23 @@ spec:
       values: |
         # Kept to what the chart definitely accepts. The previous attempt set a
         # failure policy through a key the chart merges differently, and the whole
-        # render failed — so nothing installed at all, and the policies had nothing
+        # render failed, so nothing installed at all, and the policies had nothing
         # to attach to. Less configuration that works beats more that does not.
+        #
+        # This block must stay pure ASCII. The live Application once carried a
+        # single mangled byte from a hand-applied copy of this file, and Argo
+        # diffed it against Git forever without being able to converge - the
+        # root app flapped OutOfSync for two days over one invisible character.
+        #
+        # The chart's post-upgrade clean-reports hook is off. Argo runs it as a
+        # PostSync hook on every sync, its bitnami/kubectl image ceased to exist
+        # when Bitnami retired their public catalog, and a hook that cannot pull
+        # its image is a sync that never finishes - one waited two days. The job
+        # only purges legacy pre-1.13 report formats this cluster never had.
+        # (webhooksCleanup and config.preserve name the same dead image, but only
+        # in pre/post-delete hooks that Argo never applies.)
+        policyReportsCleanup:
+          enabled: false
         admissionController:
           replicas: 1
           resources:
