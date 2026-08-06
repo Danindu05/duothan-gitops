@@ -1,0 +1,9 @@
+# Everything the cluster reads is written with LF, whatever the machine that
+# edited it does locally. A shell script that arrives with CRLF fails on Linux
+# as "bad interpreter" - the carriage return becomes part of the name.
+*           text=auto eol=lf
+*.sh        text eol=lf
+*.yaml      text eol=lf
+*.yml       text eol=lf
+*.json      text eol=lf
+*.md        text eol=lf
